@@ -594,11 +594,11 @@ PHPAPI void (*php_internal_encoding_changed)(void) = NULL;
  */
 static PHP_INI_MH(OnUpdateDefaultCharset)
 {
+	OnUpdateString(entry, new_value, mh_arg1, mh_arg2, mh_arg3, stage);
+	if (php_internal_encoding_changed) {
+		php_internal_encoding_changed();
+	}
 	if (new_value) {
-		OnUpdateString(entry, new_value, mh_arg1, mh_arg2, mh_arg3, stage);
-		if (php_internal_encoding_changed) {
-			php_internal_encoding_changed();
-		}
 #ifdef PHP_WIN32
 		php_win32_cp_do_update(ZSTR_VAL(new_value));
 #endif
@@ -611,11 +611,11 @@ static PHP_INI_MH(OnUpdateDefaultCharset)
  */
 static PHP_INI_MH(OnUpdateInternalEncoding)
 {
+	OnUpdateString(entry, new_value, mh_arg1, mh_arg2, mh_arg3, stage);
+	if (php_internal_encoding_changed) {
+		php_internal_encoding_changed();
+	}
 	if (new_value) {
-		OnUpdateString(entry, new_value, mh_arg1, mh_arg2, mh_arg3, stage);
-		if (php_internal_encoding_changed) {
-			php_internal_encoding_changed();
-		}
 #ifdef PHP_WIN32
 		php_win32_cp_do_update(ZSTR_VAL(new_value));
 #endif
@@ -628,11 +628,11 @@ static PHP_INI_MH(OnUpdateInternalEncoding)
  */
 static PHP_INI_MH(OnUpdateInputEncoding)
 {
+	OnUpdateString(entry, new_value, mh_arg1, mh_arg2, mh_arg3, stage);
+	if (php_internal_encoding_changed) {
+		php_internal_encoding_changed();
+	}
 	if (new_value) {
-		OnUpdateString(entry, new_value, mh_arg1, mh_arg2, mh_arg3, stage);
-		if (php_internal_encoding_changed) {
-			php_internal_encoding_changed();
-		}
 #ifdef PHP_WIN32
 		php_win32_cp_do_update(NULL);
 #endif
@@ -645,11 +645,11 @@ static PHP_INI_MH(OnUpdateInputEncoding)
  */
 static PHP_INI_MH(OnUpdateOutputEncoding)
 {
+	OnUpdateString(entry, new_value, mh_arg1, mh_arg2, mh_arg3, stage);
+	if (php_internal_encoding_changed) {
+		php_internal_encoding_changed();
+	}
 	if (new_value) {
-		OnUpdateString(entry, new_value, mh_arg1, mh_arg2, mh_arg3, stage);
-		if (php_internal_encoding_changed) {
-			php_internal_encoding_changed();
-		}
 #ifdef PHP_WIN32
 		php_win32_cp_do_update(NULL);
 #endif
@@ -715,10 +715,8 @@ PHP_INI_MH(OnChangeBrowscap);
  /* Windows use the internal mail */
 #if defined(PHP_WIN32)
 # define DEFAULT_SENDMAIL_PATH NULL
-#elif defined(PHP_PROG_SENDMAIL)
-# define DEFAULT_SENDMAIL_PATH PHP_PROG_SENDMAIL " -t -i "
 #else
-# define DEFAULT_SENDMAIL_PATH "/usr/sbin/sendmail -t -i"
+# define DEFAULT_SENDMAIL_PATH PHP_PROG_SENDMAIL " -t -i"
 #endif
 
 /* {{{ PHP_INI
@@ -1119,9 +1117,7 @@ PHPAPI ZEND_COLD void php_verror(const char *docref, const char *params, int typ
 	if (replace_buffer) {
 		zend_string_free(replace_buffer);
 	} else {
-		if (buffer_len > 0) {
-			efree(buffer);
-		}
+		efree(buffer);
 	}
 
 	php_error(type, "%s", message);
@@ -1296,7 +1292,7 @@ static ZEND_COLD void php_error_cb(int type, const char *error_filename, const u
 				break;
 			case E_PARSE:
 				error_type_str = "Parse error";
-				syslog_type_int = LOG_EMERG;
+				syslog_type_int = LOG_ERR;
 				break;
 			case E_NOTICE:
 			case E_USER_NOTICE:
@@ -2146,12 +2142,18 @@ int php_module_startup(sapi_module_struct *sf, zend_module_entry *additional_mod
 #ifdef PHP_WIN32
 # if PHP_LINKER_MAJOR == 14
 	/* Extend for other CRT if needed. */
+#  if PHP_DEBUG
+#   define PHP_VCRUNTIME "vcruntime140d.dll"
+#  else
+#   define PHP_VCRUNTIME "vcruntime140.dll"
+#  endif
 	char *img_err;
-	if (!php_win32_crt_compatible("vcruntime140.dll", &img_err)) {
+	if (!php_win32_crt_compatible(PHP_VCRUNTIME, &img_err)) {
 		php_error(E_CORE_WARNING, img_err);
 		efree(img_err);
 		return FAILURE;
 	}
+#  undef PHP_VCRUNTIME
 # endif
 
 	/* start up winsock services */

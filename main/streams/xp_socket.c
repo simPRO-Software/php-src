@@ -75,30 +75,36 @@ retry:
 	didwrite = send(sock->socket, buf, XP_SOCK_BUF_SIZE(count), (sock->is_blocked && ptimeout) ? MSG_DONTWAIT : 0);
 
 	if (didwrite <= 0) {
-		int err = php_socket_errno();
 		char *estr;
+		int err = php_socket_errno();
+		if (err == EWOULDBLOCK || err == EAGAIN) {
+			if (sock->is_blocked) {
+				int retval;
 
-		if (sock->is_blocked && (err == EWOULDBLOCK || err == EAGAIN)) {
-			int retval;
+				sock->timeout_event = 0;
 
-			sock->timeout_event = 0;
+				do {
+					retval = php_pollfd_for(sock->socket, POLLOUT, ptimeout);
 
-			do {
-				retval = php_pollfd_for(sock->socket, POLLOUT, ptimeout);
+					if (retval == 0) {
+						sock->timeout_event = 1;
+						break;
+					}
 
-				if (retval == 0) {
-					sock->timeout_event = 1;
-					break;
-				}
+					if (retval > 0) {
+						/* writable now; retry */
+						goto retry;
+					}
 
-				if (retval > 0) {
-					/* writable now; retry */
-					goto retry;
-				}
-
-				err = php_socket_errno();
-			} while (err == EINTR);
+					err = php_socket_errno();
+				} while (err == EINTR);
+			} else {
+				/* EWOULDBLOCK/EAGAIN is not an error for a non-blocking stream.
+				 * Report zero byte write instead. */
+				return 0;
+			}
 		}
+
 		estr = php_socket_strerror(err, NULL, 0);
 		php_error_docref(NULL, E_NOTICE, "send of " ZEND_LONG_FMT " bytes failed with errno=%d %s",
 				(zend_long)count, err, estr);
@@ -272,6 +278,12 @@ static inline int sock_recvfrom(php_netstream_data_t *sock, char *buf, size_t bu
 		socklen_t sl = sizeof(sa);
 		ret = recvfrom(sock->socket, buf, XP_SOCK_BUF_SIZE(buflen), flags, (struct sockaddr*)&sa, &sl);
 		ret = (ret == SOCK_CONN_ERR) ? -1 : ret;
+#ifdef PHP_WIN32
+		/* POSIX discards excess bytes without signalling failure; emulate this on Windows */
+		if (ret == -1 && WSAGetLastError() == WSAEMSGSIZE) {
+			ret = buflen;
+		}
+#endif
 		if (sl) {
 			php_network_populate_name_from_sockaddr((struct sockaddr*)&sa, sl,
 					textaddr, addr, addrlen);

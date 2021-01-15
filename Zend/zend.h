@@ -20,7 +20,7 @@
 #ifndef ZEND_H
 #define ZEND_H
 
-#define ZEND_VERSION "4.0.0-dev"
+#define ZEND_VERSION "3.4.0"
 
 #define ZEND_ENGINE_3
 
@@ -244,7 +244,7 @@ ZEND_API zend_string *zend_strpprintf(size_t max_len, const char *format, ...) Z
 ZEND_API size_t zend_spprintf_unchecked(char **message, size_t max_len, const char *format, ...);
 ZEND_API zend_string *zend_strpprintf_unchecked(size_t max_len, const char *format, ...);
 
-ZEND_API const char *get_zend_version(void);
+ZEND_API char *get_zend_version(void);
 ZEND_API int zend_make_printable_zval(zval *expr, zval *expr_copy);
 ZEND_API size_t zend_print_zval(zval *expr, int indent);
 ZEND_API void zend_print_zval_r(zval *expr, int indent);
@@ -292,6 +292,9 @@ extern ZEND_API zend_string *(*zend_resolve_path)(const char *filename, size_t f
 extern ZEND_API int (*zend_post_startup_cb)(void);
 extern ZEND_API void (*zend_post_shutdown_cb)(void);
 
+/* Callback for loading of not preloaded part of the script */
+extern ZEND_API int (*zend_preload_autoload)(zend_string *filename);
+
 ZEND_API ZEND_COLD void zend_error(int type, const char *format, ...) ZEND_ATTRIBUTE_FORMAT(printf, 2, 3);
 ZEND_API ZEND_COLD ZEND_NORETURN void zend_error_noreturn(int type, const char *format, ...) ZEND_ATTRIBUTE_FORMAT(printf, 2, 3);
 /* If filename is NULL the default filename is used. */
@@ -300,7 +303,8 @@ ZEND_API ZEND_COLD ZEND_NORETURN void zend_error_at_noreturn(int type, const cha
 
 ZEND_API ZEND_COLD void zend_throw_error(zend_class_entry *exception_ce, const char *format, ...) ZEND_ATTRIBUTE_FORMAT(printf, 2, 3);
 ZEND_API ZEND_COLD void zend_type_error(const char *format, ...) ZEND_ATTRIBUTE_FORMAT(printf, 1, 2);
-ZEND_API ZEND_COLD void zend_argument_count_error(const char *format, ...) ZEND_ATTRIBUTE_FORMAT(printf, 1, 2);
+ZEND_API ZEND_COLD void zend_internal_type_error(zend_bool throw_exception, const char *format, ...) ZEND_ATTRIBUTE_FORMAT(printf, 2, 3);
+ZEND_API ZEND_COLD void zend_internal_argument_count_error(zend_bool throw_exception, const char *format, ...) ZEND_ATTRIBUTE_FORMAT(printf, 2, 3);
 
 ZEND_COLD void zenderror(const char *error);
 

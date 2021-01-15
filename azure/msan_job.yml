@@ -8,7 +8,7 @@ jobs:
   - job: ${{ parameters.configurationName }}
     timeoutInMinutes: ${{ parameters.timeoutInMinutes }}
     pool:
-      vmImage: 'ubuntu-latest'
+      vmImage: 'ubuntu-18.04'
     steps:
     - template: apt.yml
     - script: |
@@ -36,6 +36,7 @@ jobs:
             --enable-fpm \
             --with-pdo-mysql=mysqlnd \
             --with-mysqli=mysqlnd \
+            --disable-mysqlnd-compression-support \
             --without-pear \
             --enable-exif \
             --enable-sysvsem \
@@ -63,6 +64,7 @@ jobs:
         echo pdo_mysql.default_socket=/var/run/mysqld/mysqld.sock  > /etc/php.d/pdo_mysql.ini
       displayName: 'Install Build'
     - script: |
+        sudo service mysql start
         mysql -uroot -proot -e "CREATE DATABASE IF NOT EXISTS test"
       displayName: 'Setup'
     - template: test.yml

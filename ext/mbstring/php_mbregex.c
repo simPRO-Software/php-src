@@ -39,6 +39,7 @@ typedef void OnigMatchParam;
 #define onig_new_match_param() (NULL)
 #define onig_initialize_match_param(x) (void)(x)
 #define onig_set_match_stack_limit_size_of_match_param(x, y)
+#define onig_set_retry_limit_in_match_of_match_param(x, y)
 #define onig_free_match_param(x)
 #define onig_search_with_param(reg, str, end, start, range, region, option, mp) \
 		onig_search(reg, str, end, start, range, region, option)
@@ -155,6 +156,7 @@ PHP_RSHUTDOWN_FUNCTION(mb_regex)
 		ZVAL_UNDEF(&MBREX(search_str));
 	}
 	MBREX(search_pos) = 0;
+	MBREX(search_re) = NULL;
 
 	if (MBREX(search_regs) != NULL) {
 		onig_region_free(MBREX(search_regs), 1);
@@ -874,6 +876,9 @@ static int _php_mb_onig_search(regex_t* reg, const OnigUChar* str, const OnigUCh
 	if (!ZEND_LONG_UINT_OVFL(MBSTRG(regex_stack_limit))) {
 		onig_set_match_stack_limit_size_of_match_param(mp, (unsigned int)MBSTRG(regex_stack_limit));
 	}
+	if (!ZEND_LONG_UINT_OVFL(MBSTRG(regex_retry_limit))) {
+		onig_set_retry_limit_in_match_of_match_param(mp, (unsigned int)MBSTRG(regex_retry_limit));
+	}
 	/* search */
 	err = onig_search_with_param(reg, str, end, start, range, region, option, mp);
 	onig_free_match_param(mp);
@@ -1362,8 +1367,11 @@ PHP_FUNCTION(mb_ereg_match)
 
 	mp = onig_new_match_param();
 	onig_initialize_match_param(mp);
-	if(MBSTRG(regex_stack_limit) > 0 && MBSTRG(regex_stack_limit) < UINT_MAX) {
+	if (MBSTRG(regex_stack_limit) > 0 && MBSTRG(regex_stack_limit) < UINT_MAX) {
 		onig_set_match_stack_limit_size_of_match_param(mp, (unsigned int)MBSTRG(regex_stack_limit));
+	}
+	if (MBSTRG(regex_retry_limit) > 0 && MBSTRG(regex_retry_limit) < UINT_MAX) {
+		onig_set_retry_limit_in_match_of_match_param(mp, (unsigned int)MBSTRG(regex_retry_limit));
 	}
 	/* match */
 	err = onig_match_with_param(re, (OnigUChar *)string, (OnigUChar *)(string + string_len), (OnigUChar *)string, NULL, 0, mp);
@@ -1385,7 +1393,7 @@ _php_mb_regex_ereg_search_exec(INTERNAL_FUNCTION_PARAMETERS, int mode)
 	size_t arg_pattern_len, arg_options_len;
 	int err;
 	size_t n, i, pos, len, beg, end;
-	OnigOptionType option;
+	OnigOptionType option = 0;
 	OnigUChar *str;
 	OnigSyntaxType *syntax;
 
@@ -1393,16 +1401,21 @@ _php_mb_regex_ereg_search_exec(INTERNAL_FUNCTION_PARAMETERS, int mode)
 		return;
 	}
 
-	option = MBREX(regex_default_options);
-
 	if (arg_options) {
-		option = 0;
 		_php_mb_regex_init_options(arg_options, arg_options_len, &option, &syntax, NULL);
+	} else {
+		option |= MBREX(regex_default_options);
+		syntax = MBREX(regex_default_syntax);
+	}
+
+	if (MBREX(search_regs)) {
+		onig_region_free(MBREX(search_regs), 1);
+		MBREX(search_regs) = NULL;
 	}
 
 	if (arg_pattern) {
 		/* create regex pattern buffer */
-		if ((MBREX(search_re) = php_mbregex_compile_pattern(arg_pattern, arg_pattern_len, option, MBREX(current_mbctype), MBREX(regex_default_syntax))) == NULL) {
+		if ((MBREX(search_re) = php_mbregex_compile_pattern(arg_pattern, arg_pattern_len, option, MBREX(current_mbctype), syntax)) == NULL) {
 			RETURN_FALSE;
 		}
 	}
@@ -1425,9 +1438,6 @@ _php_mb_regex_ereg_search_exec(INTERNAL_FUNCTION_PARAMETERS, int mode)
 		RETURN_FALSE;
 	}
 
-	if (MBREX(search_regs)) {
-		onig_region_free(MBREX(search_regs), 1);
-	}
 	MBREX(search_regs) = onig_region_new();
 
 	err = _php_mb_onig_search(MBREX(search_re), str, str + len, str + pos, str  + len, MBREX(search_regs), 0);

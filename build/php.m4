@@ -308,8 +308,8 @@ dnl
 dnl PHP_CHECK_GCC_ARG(arg, action-if-found, action-if-not-found)
 dnl
 AC_DEFUN([PHP_CHECK_GCC_ARG],[
-  gcc_arg_name=[ac_cv_gcc_arg]translit($1,A-Z-,a-z_)
-  AC_CACHE_CHECK([whether $CC supports $1], [ac_cv_gcc_arg]translit($1,A-Z-,a-z_), [
+  gcc_arg_name=[ac_cv_gcc_arg]translit($1,A-Z=-,a-z__)
+  AC_CACHE_CHECK([whether $CC supports $1], [ac_cv_gcc_arg]translit($1,A-Z=-,a-z__), [
   echo 'void somefunc() { };' > conftest.c
   cmd='$CC $1 -c conftest.c'
   if eval $cmd 2>&1 | $EGREP -e $1 >/dev/null ; then
@@ -373,6 +373,8 @@ AC_DEFUN([PHP_EVAL_LIBLINE],[
         $2="[$]$2 -pthread"
       else
         PHP_RUN_ONCE(EXTRA_LDFLAGS, [$ac_i], [EXTRA_LDFLAGS="$EXTRA_LDFLAGS $ac_i"])
+        PHP_RUN_ONCE(EXTRA_LDFLAGS_PROGRAM, [$ac_i],
+            [EXTRA_LDFLAGS_PROGRAM="$EXTRA_LDFLAGS_PROGRAM $ac_i"])
       fi
     ;;
     -l*[)]
@@ -496,7 +498,7 @@ dnl Internal, don't use.
 dnl
 AC_DEFUN([_PHP_ADD_LIBRARY_SKELETON],[
   case $1 in
-  c|c_r|pthread*[)] ;;
+  c|c_r[)] ;;
   *[)] ifelse($3,,[
     _PHP_X_ADD_LIBRARY($1,$2,$5)
   ],[
@@ -1174,14 +1176,14 @@ AC_DEFUN([PHP_DOES_PWRITE_WORK],[
 #include <unistd.h>
 #include <errno.h>
 $1
-    main() {
+    int main() {
     int fd = open("conftest_in", O_WRONLY|O_CREAT, 0600);
 
-    if (fd < 0) exit(1);
-    if (pwrite(fd, "text", 4, 0) != 4) exit(1);
+    if (fd < 0) return 1;
+    if (pwrite(fd, "text", 4, 0) != 4) return 1;
     /* Linux glibc breakage until 2.2.5 */
-    if (pwrite(fd, "text", 4, -1) != -1 || errno != EINVAL) exit(1);
-    exit(0);
+    if (pwrite(fd, "text", 4, -1) != -1 || errno != EINVAL) return 1;
+    return 0;
     }
 
   ]])],[
@@ -1207,14 +1209,14 @@ AC_DEFUN([PHP_DOES_PREAD_WORK],[
 #include <unistd.h>
 #include <errno.h>
 $1
-    main() {
+    int main() {
     char buf[3];
     int fd = open("conftest_in", O_RDONLY);
-    if (fd < 0) exit(1);
-    if (pread(fd, buf, 2, 0) != 2) exit(1);
+    if (fd < 0) return 1;
+    if (pread(fd, buf, 2, 0) != 2) return 1;
     /* Linux glibc breakage until 2.2.5 */
-    if (pread(fd, buf, 2, -1) != -1 || errno != EINVAL) exit(1);
-    exit(0);
+    if (pread(fd, buf, 2, -1) != -1 || errno != EINVAL) return 1;
+    return 0;
     }
   ]])],[
     ac_cv_pread=yes
@@ -1462,27 +1464,27 @@ AC_RUN_IFELSE([AC_LANG_SOURCE([[
 #include <stdio.h>
 
 struct cookiedata {
-  __off64_t pos;
+  off64_t pos;
 };
 
-__ssize_t reader(void *cookie, char *buffer, size_t size)
+ssize_t reader(void *cookie, char *buffer, size_t size)
 { return size; }
-__ssize_t writer(void *cookie, const char *buffer, size_t size)
+ssize_t writer(void *cookie, const char *buffer, size_t size)
 { return size; }
 int closer(void *cookie)
 { return 0; }
-int seeker(void *cookie, __off64_t *position, int whence)
+int seeker(void *cookie, off64_t *position, int whence)
 { ((struct cookiedata*)cookie)->pos = *position; return 0; }
 
 cookie_io_functions_t funcs = {reader, writer, seeker, closer};
 
-main() {
+int main() {
   struct cookiedata g = { 0 };
   FILE *fp = fopencookie(&g, "r", funcs);
 
   if (fp && fseek(fp, 8192, SEEK_SET) == 0 && g.pos == 8192)
-    exit(0);
-  exit(1);
+    return 0;
+  return 1;
 }
 
 ]])], [
@@ -1731,7 +1733,7 @@ dnl Search for the sendmail binary.
 dnl
 AC_DEFUN([PHP_PROG_SENDMAIL], [
   PHP_ALT_PATH=/usr/bin:/usr/sbin:/usr/etc:/etc:/usr/ucblib:/usr/lib
-  AC_PATH_PROG(PROG_SENDMAIL, sendmail,[], $PATH:$PHP_ALT_PATH)
+  AC_PATH_PROG(PROG_SENDMAIL, sendmail, /usr/sbin/sendmail, $PATH:$PHP_ALT_PATH)
   PHP_SUBST(PROG_SENDMAIL)
 ])
 
@@ -1781,6 +1783,9 @@ AC_DEFUN([PHP_PROG_BISON], [
     AC_MSG_CHECKING([for bison version])
 
     php_bison_version=$($YACC --version 2> /dev/null | grep 'GNU Bison' | cut -d ' ' -f 4 | tr -d a-z)
+    if test -z "$php_bison_version"; then
+      php_bison_version=0.0.0
+    fi
     ac_IFS=$IFS; IFS="."
     set $php_bison_version
     IFS=$ac_IFS
@@ -1844,6 +1849,9 @@ AC_DEFUN([PHP_PROG_RE2C],[
     AC_MSG_CHECKING([for re2c version])
 
     php_re2c_version=$($RE2C --version | cut -d ' ' -f 2 2>/dev/null)
+    if test -z "$php_re2c_version"; then
+      php_re2c_version=0.0.0
+    fi
     ac_IFS=$IFS; IFS="."
     set $php_re2c_version
     IFS=$ac_IFS
@@ -1905,6 +1913,8 @@ AC_DEFUN([PHP_SETUP_ICU],[
   if test "$PKG_CONFIG icu-io --atleast-version=60"; then
     ICU_CFLAGS="$ICU_CFLAGS -DU_HIDE_OBSOLETE_UTF_OLD_H=1"
   fi
+
+  ICU_CFLAGS="$ICU_CFLAGS -DU_DEFINE_FALSE_AND_TRUE=1"
 ])
 
 dnl
@@ -1915,13 +1925,7 @@ dnl
 AC_DEFUN([PHP_SETUP_OPENSSL],[
   found_openssl=no
 
-  dnl Empty variable means 'no'.
-  test -z "$PHP_OPENSSL" && PHP_OPENSSL=no
-  test -z "$PHP_IMAP_SSL" && PHP_IMAP_SSL=no
-
-  if test "$PHP_OPENSSL" != "no"; then
-    PKG_CHECK_MODULES([OPENSSL], [openssl >= 1.0.1], [found_openssl=yes])
-  fi
+  PKG_CHECK_MODULES([OPENSSL], [openssl >= 1.0.1], [found_openssl=yes])
 
   if test "$found_openssl" = "yes"; then
     PHP_EVAL_LIBLINE($OPENSSL_LIBS, $1)
@@ -2326,7 +2330,7 @@ dnl header-file.
 dnl Add providerdesc.o or .lo into global objects when needed.
   case $host_alias in
   *freebsd*)
-    PHP_GLOBAL_OBJS="[$]PHP_GLOBAL_OBJS [$]ac_bdir[$]ac_provsrc.o"
+    PHP_GLOBAL_OBJS="[$]PHP_GLOBAL_OBJS [$]ac_bdir[$]ac_provsrc.lo"
     PHP_LDFLAGS="$PHP_LDFLAGS -lelf"
     ;;
   *solaris*)
@@ -2374,7 +2378,7 @@ $ac_bdir[$]ac_hdrobj: $abs_srcdir/$ac_provsrc
 EOF
 
   case $host_alias in
-  *solaris*|*linux*)
+  *solaris*|*linux*|*freebsd*)
     dtrace_prov_name="`echo $ac_provsrc | $SED -e 's#\(.*\)\/##'`.o"
     dtrace_lib_dir="`echo $ac_bdir[$]ac_provsrc | $SED -e 's#\(.*\)/[^/]*#\1#'`/.libs"
     dtrace_d_obj="`echo $ac_bdir[$]ac_provsrc | $SED -e 's#\(.*\)/\([^/]*\)#\1/.libs/\2#'`.o"
@@ -2420,6 +2424,7 @@ AC_DEFUN([PHP_CHECK_STDINT_TYPES], [
   AC_CHECK_SIZEOF([long])
   AC_CHECK_SIZEOF([long long])
   AC_CHECK_SIZEOF([size_t])
+  AC_CHECK_SIZEOF([off_t])
   AC_CHECK_TYPES([int8, int16, int32, int64, int8_t, int16_t, int32_t, int64_t, uint8, uint16, uint32, uint64, uint8_t, uint16_t, uint32_t, uint64_t, u_int8_t, u_int16_t, u_int32_t, u_int64_t], [], [], [
 #if HAVE_STDINT_H
 # include <stdint.h>

@@ -81,6 +81,7 @@ ZEND_API char *(*zend_getenv)(char *name, size_t name_len);
 ZEND_API zend_string *(*zend_resolve_path)(const char *filename, size_t filename_len);
 ZEND_API int (*zend_post_startup_cb)(void) = NULL;
 ZEND_API void (*zend_post_shutdown_cb)(void) = NULL;
+ZEND_API int (*zend_preload_autoload)(zend_string *filename) = NULL;
 
 void (*zend_on_timeout)(int seconds);
 
@@ -164,6 +165,12 @@ static ZEND_INI_MH(OnUpdateAssertions) /* {{{ */
 }
 /* }}} */
 
+#if ZEND_DEBUG
+# define SIGNAL_CHECK_DEFAULT "1"
+#else
+# define SIGNAL_CHECK_DEFAULT "0"
+#endif
+
 ZEND_INI_BEGIN()
 	ZEND_INI_ENTRY("error_reporting",				NULL,		ZEND_INI_ALL,		OnUpdateErrorReporting)
 	STD_ZEND_INI_ENTRY("zend.assertions",				"1",    ZEND_INI_ALL,       OnUpdateAssertions,           assertions,   zend_executor_globals,  executor_globals)
@@ -172,7 +179,7 @@ ZEND_INI_BEGIN()
  	ZEND_INI_ENTRY("zend.script_encoding",			NULL,		ZEND_INI_ALL,		OnUpdateScriptEncoding)
  	STD_ZEND_INI_BOOLEAN("zend.detect_unicode",			"1",	ZEND_INI_ALL,		OnUpdateBool, detect_unicode, zend_compiler_globals, compiler_globals)
 #ifdef ZEND_SIGNALS
-	STD_ZEND_INI_BOOLEAN("zend.signal_check", "0", ZEND_INI_SYSTEM, OnUpdateBool, check, zend_signal_globals_t, zend_signal_globals)
+	STD_ZEND_INI_BOOLEAN("zend.signal_check", SIGNAL_CHECK_DEFAULT, ZEND_INI_SYSTEM, OnUpdateBool, check, zend_signal_globals_t, zend_signal_globals)
 #endif
 	STD_ZEND_INI_BOOLEAN("zend.exception_ignore_args",	"0",	ZEND_INI_ALL,		OnUpdateBool, exception_ignore_args, zend_executor_globals, executor_globals)
 ZEND_INI_END()
@@ -524,6 +531,8 @@ static void zend_set_default_compile_time_values(void) /* {{{ */
 	/* default compile-time values */
 	CG(short_tags) = short_tags_default;
 	CG(compiler_options) = compiler_options_default;
+
+	CG(rtd_key_counter) = 0;
 }
 /* }}} */
 
@@ -1077,6 +1086,11 @@ void zend_shutdown(void) /* {{{ */
 		CG(map_ptr_base) = NULL;
 		CG(map_ptr_size) = 0;
 	}
+	if (CG(script_encoding_list)) {
+		free(CG(script_encoding_list));
+		CG(script_encoding_list) = NULL;
+		CG(script_encoding_list_size) = 0;
+	}
 #endif
 	zend_destroy_rsrc_list_dtors();
 }
@@ -1294,7 +1308,9 @@ static ZEND_COLD void zend_error_va_list(
 #ifdef HAVE_DTRACE
 	if (DTRACE_ERROR_ENABLED()) {
 		char *dtrace_error_buffer;
-		zend_vspprintf(&dtrace_error_buffer, 0, format, args);
+		va_copy(usr_copy, args);
+		zend_vspprintf(&dtrace_error_buffer, 0, format, usr_copy);
+		va_end(usr_copy);
 		DTRACE_ERROR(dtrace_error_buffer, (char *)error_filename, error_lineno);
 		efree(dtrace_error_buffer);
 	}

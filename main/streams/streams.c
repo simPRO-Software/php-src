@@ -152,10 +152,16 @@ static zend_llist *php_get_wrapper_errors_list(php_stream_wrapper *wrapper)
 /* {{{ wrapper error reporting */
 void php_stream_display_wrapper_errors(php_stream_wrapper *wrapper, const char *path, const char *caption)
 {
-	char *tmp = estrdup(path);
+	char *tmp;
 	char *msg;
 	int free_msg = 0;
 
+	if (EG(exception)) {
+		/* Don't emit additional warnings if an exception has already been thrown. */
+		return;
+	}
+
+	tmp = estrdup(path);
 	if (wrapper) {
 		zend_llist *err_list = php_get_wrapper_errors_list(wrapper);
 		if (err_list) {
@@ -481,9 +487,15 @@ fprintf(stderr, "stream_free: %s:%p[%s] preserve_handle=%d release_cast=%d remov
 
 	if (close_options & PHP_STREAM_FREE_RELEASE_STREAM) {
 		while (stream->readfilters.head) {
+			if (stream->readfilters.head->res != NULL) {
+				zend_list_close(stream->readfilters.head->res);
+			}
 			php_stream_filter_remove(stream->readfilters.head, 1);
 		}
 		while (stream->writefilters.head) {
+			if (stream->writefilters.head->res != NULL) {
+				zend_list_close(stream->writefilters.head->res);
+			}
 			php_stream_filter_remove(stream->writefilters.head, 1);
 		}
 
@@ -534,10 +546,6 @@ PHPAPI int _php_stream_fill_read_buffer(php_stream *stream, size_t size)
 		php_stream_bucket_brigade brig_in = { NULL, NULL }, brig_out = { NULL, NULL };
 		php_stream_bucket_brigade *brig_inp = &brig_in, *brig_outp = &brig_out, *brig_swap;
 
-		/* Invalidate the existing cache, otherwise reads can fail, see note in
-		   main/streams/filter.c::_php_stream_filter_append */
-		stream->writepos = stream->readpos = 0;
-
 		/* allocate a buffer for reading chunks */
 		chunk_buf = emalloc(stream->chunk_size);
 
@@ -559,7 +567,7 @@ PHPAPI int _php_stream_fill_read_buffer(php_stream *stream, size_t size)
 				/* after this call, bucket is owned by the brigade */
 				php_stream_bucket_append(brig_inp, bucket);
 
-				flags = PSFS_FLAG_NORMAL;
+				flags = stream->eof ? PSFS_FLAG_FLUSH_CLOSE : PSFS_FLAG_NORMAL;
 			} else {
 				flags = stream->eof ? PSFS_FLAG_FLUSH_CLOSE : PSFS_FLAG_FLUSH_INC;
 			}
@@ -588,8 +596,15 @@ PHPAPI int _php_stream_fill_read_buffer(php_stream *stream, size_t size)
 					 * stream read buffer */
 					while (brig_inp->head) {
 						bucket = brig_inp->head;
-						/* grow buffer to hold this bucket
-						 * TODO: this can fail for persistent streams */
+						/* reduce buffer memory consumption if possible, to avoid a realloc */
+						if (stream->readbuf && stream->readbuflen - stream->writepos < bucket->buflen) {
+							if (stream->writepos > stream->readpos) {
+								memmove(stream->readbuf, stream->readbuf + stream->readpos, stream->writepos - stream->readpos);
+							}
+							stream->writepos -= stream->readpos;
+							stream->readpos = 0;
+						}
+						/* grow buffer to hold this bucket */
 						if (stream->readbuflen - stream->writepos < bucket->buflen) {
 							stream->readbuflen += bucket->buflen;
 							stream->readbuf = perealloc(stream->readbuf, stream->readbuflen,
@@ -1558,61 +1573,78 @@ PHPAPI int _php_stream_copy_to_stream_ex(php_stream *src, php_stream *dest, size
 
 	if (php_stream_mmap_possible(src)) {
 		char *p;
-		size_t mapped;
 
-		p = php_stream_mmap_range(src, php_stream_tell(src), maxlen, PHP_STREAM_MAP_MODE_SHARED_READONLY, &mapped);
+		do {
+			size_t chunk_size = (maxlen == 0 || maxlen > PHP_STREAM_MMAP_MAX) ? PHP_STREAM_MMAP_MAX : maxlen;
+			size_t mapped;
 
-		if (p) {
-			ssize_t didwrite = php_stream_write(dest, p, mapped);
-			if (didwrite < 0) {
-				*len = 0;
-				return FAILURE;
+			p = php_stream_mmap_range(src, php_stream_tell(src), chunk_size, PHP_STREAM_MAP_MODE_SHARED_READONLY, &mapped);
+
+			if (p) {
+				ssize_t didwrite;
+
+				if (php_stream_seek(src, mapped, SEEK_CUR) != 0) {
+					php_stream_mmap_unmap(src);
+					break;
+				}
+
+				didwrite = php_stream_write(dest, p, mapped);
+				if (didwrite < 0) {
+					*len = haveread;
+					return FAILURE;
+				}
+
+				php_stream_mmap_unmap(src);
+
+				*len = haveread += didwrite;
+
+				/* we've got at least 1 byte to read
+				 * less than 1 is an error
+				 * AND read bytes match written */
+				if (mapped == 0 || mapped != didwrite) {
+					return FAILURE;
+				}
+				if (mapped < chunk_size) {
+					return SUCCESS;
+				}
+				if (maxlen != 0) {
+					maxlen -= mapped;
+					if (maxlen == 0) {
+						return SUCCESS;
+					}
+				}
 			}
-
-			php_stream_mmap_unmap_ex(src, mapped);
-
-			*len = didwrite;
-
-			/* we've got at least 1 byte to read
-			 * less than 1 is an error
-			 * AND read bytes match written */
-			if (mapped > 0 && mapped == didwrite) {
-				return SUCCESS;
-			}
-			return FAILURE;
-		}
+		} while (p);
 	}
 
 	while(1) {
 		size_t readchunk = sizeof(buf);
 		ssize_t didread;
+		char *writeptr;
 
 		if (maxlen && (maxlen - haveread) < readchunk) {
 			readchunk = maxlen - haveread;
 		}
 
 		didread = php_stream_read(src, buf, readchunk);
+		if (didread <= 0) {
+			*len = haveread;
+			return didread < 0 ? FAILURE : SUCCESS;
+		}
 
-		if (didread > 0) {
-			/* extra paranoid */
-			char *writeptr;
+		towrite = didread;
+		writeptr = buf;
+		haveread += didread;
 
-			towrite = didread;
-			writeptr = buf;
-			haveread += didread;
-
-			while (towrite) {
-				ssize_t didwrite = php_stream_write(dest, writeptr, towrite);
-				if (didwrite <= 0) {
-					*len = haveread - (didread - towrite);
-					return FAILURE;
-				}
-
-				towrite -= didwrite;
-				writeptr += didwrite;
+		while (towrite) {
+			ssize_t didwrite = php_stream_write(dest, writeptr, towrite);
+			if (didwrite <= 0) {
+				*len = haveread - (didread - towrite);
+				return FAILURE;
 			}
-		} else {
-			break;
+
+			towrite -= didwrite;
+			writeptr += didwrite;
 		}
 
 		if (maxlen - haveread == 0) {
@@ -2073,6 +2105,9 @@ PHPAPI php_stream *_php_stream_open_wrapper_ex(const char *path, const char *mod
 			/* we've found this file, don't re-check include_path or run realpath */
 			options |= STREAM_ASSUME_REALPATH;
 			options &= ~USE_PATH;
+		}
+		if (EG(exception)) {
+			return NULL;
 		}
 	}
 

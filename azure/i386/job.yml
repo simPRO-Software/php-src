@@ -5,7 +5,7 @@ parameters:
 jobs:
   - job: ${{ parameters.configurationName }}
     pool:
-      vmImage: 'ubuntu-latest'
+      vmImage: 'ubuntu-18.04'
     steps:
     - template: apt.yml
     - script: |
@@ -61,6 +61,8 @@ jobs:
             --enable-sysvmsg \
             --with-ffi \
             --enable-zend-test \
+            --with-mhash \
+            --with-sodium \
             --enable-werror \
             --with-config-file-path=/etc \
             --with-config-file-scan-dir=/etc/php.d
@@ -68,16 +70,21 @@ jobs:
     - script: make -j$(/usr/bin/nproc) >/dev/null
       displayName: 'Make Build'
     - script: |
+        set -e
         sudo make install
         sudo mkdir     /etc/php.d
         sudo chmod 777 /etc/php.d
         echo mysqli.default_socket=/var/run/mysqld/mysqld.sock     > /etc/php.d/mysqli.ini
         echo pdo_mysql.default_socket=/var/run/mysqld/mysqld.sock  > /etc/php.d/pdo_mysql.ini
+        echo opcache.enable_cli=1 >> /etc/php.d/opcache.ini
+        echo opcache.protect_memory=1 >> /etc/php.d/opcache.ini
       displayName: 'Install Build'
     - script: |
+        set -e
+        sudo service mysql start
         mysql -uroot -proot -e "CREATE DATABASE IF NOT EXISTS test"
-        sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
-        sudo -u postgres psql -c "CREATE DATABASE test;"
+        #sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+        #sudo -u postgres psql -c "CREATE DATABASE test;"
       displayName: 'Setup'
     - template: test.yml
       parameters:
@@ -86,9 +93,4 @@ jobs:
       parameters:
         configurationName: ${{ parameters.configurationName }}
         runTestsName: 'OpCache'
-        runTestsParameters: -d zend_extension=opcache.so -d opcache.enable_cli=1
-    - template: test.yml
-      parameters:
-        configurationName: ${{ parameters.configurationName }}
-        runTestsName: 'JIT'
-        runTestsParameters: -d zend_extension=opcache.so -d opcache.enable_cli=1 -d opcache.jit_buffer_size=16M
+        runTestsParameters: -d zend_extension=opcache.so

@@ -76,8 +76,7 @@ int _pdo_sqlite_error(pdo_dbh_t *dbh, pdo_stmt_t *stmt, const char *file, int li
 	}
 
 	if (!dbh->methods) {
-		zend_throw_exception_ex(php_pdo_get_exception(), einfo->errcode, "SQLSTATE[%s] [%d] %s",
-				*pdo_err, einfo->errcode, einfo->errmsg);
+		pdo_throw_exception(einfo->errcode, einfo->errmsg, pdo_err);
 	}
 
 	return einfo->errcode;
@@ -806,6 +805,9 @@ static int pdo_sqlite_handle_factory(pdo_dbh_t *dbh, zval *driver_options) /* {{
 	H->einfo.errcode = 0;
 	H->einfo.errmsg = NULL;
 	dbh->driver_data = H;
+
+	/* skip all but this one param event */
+	dbh->skip_param_evt = 0x7F ^ (1 << PDO_PARAM_EVT_EXEC_PRE);
 
 	filename = make_filename_safe(dbh->data_source);
 

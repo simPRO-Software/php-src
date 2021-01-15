@@ -99,6 +99,14 @@ static int le_socket;
 static int le_addrinfo;
 #define le_addrinfo_name php_sockets_le_addrinfo_name
 
+/* The AI_IDN_ALLOW_UNASSIGNED deprecations are implemented as a pragma GCC warning,
+ * using _Pragma() for macro support. As this warning is thrown without a warning
+ * category, it's also not possible to suppress it, because it is not part of
+ * -Wdeprecated-declarations or similar. We work around this by defining
+ * __glibc_macro_warning() to be empty. */
+#undef __glibc_macro_warning
+#define __glibc_macro_warning(message)
+
 /* {{{ arginfo */
 ZEND_BEGIN_ARG_INFO_EX(arginfo_socket_select, 0, 0, 4)
 	ZEND_ARG_INFO(1, read_fds)
@@ -659,7 +667,7 @@ char *sockets_strerror(int error) /* {{{ */
 			}
 
 			SOCKETS_G(strerror_buf) = estrdup(tmp);
-			LocalFree(tmp);
+			free(tmp);
 
 			buf = SOCKETS_G(strerror_buf);
 		}
@@ -2020,61 +2028,62 @@ PHP_FUNCTION(socket_get_option)
 	}
 #endif
 
-	/* sol_socket options and general case */
-	switch(optname) {
-		case SO_LINGER:
-			optlen = sizeof(linger_val);
+	if (level == SOL_SOCKET) {
+		switch (optname) {
+			case SO_LINGER:
+				optlen = sizeof(linger_val);
 
-			if (getsockopt(php_sock->bsd_socket, level, optname, (char*)&linger_val, &optlen) != 0) {
-				PHP_SOCKET_ERROR(php_sock, "unable to retrieve socket option", errno);
-				RETURN_FALSE;
-			}
+				if (getsockopt(php_sock->bsd_socket, level, optname, (char*)&linger_val, &optlen) != 0) {
+					PHP_SOCKET_ERROR(php_sock, "unable to retrieve socket option", errno);
+					RETURN_FALSE;
+				}
 
-			array_init(return_value);
-			add_assoc_long(return_value, "l_onoff", linger_val.l_onoff);
-			add_assoc_long(return_value, "l_linger", linger_val.l_linger);
-			break;
+				array_init(return_value);
+				add_assoc_long(return_value, "l_onoff", linger_val.l_onoff);
+				add_assoc_long(return_value, "l_linger", linger_val.l_linger);
+				return;
 
-		case SO_RCVTIMEO:
-		case SO_SNDTIMEO:
+			case SO_RCVTIMEO:
+			case SO_SNDTIMEO:
 #ifndef PHP_WIN32
-			optlen = sizeof(tv);
+				optlen = sizeof(tv);
 
-			if (getsockopt(php_sock->bsd_socket, level, optname, (char*)&tv, &optlen) != 0) {
-				PHP_SOCKET_ERROR(php_sock, "unable to retrieve socket option", errno);
-				RETURN_FALSE;
-			}
+				if (getsockopt(php_sock->bsd_socket, level, optname, (char*)&tv, &optlen) != 0) {
+					PHP_SOCKET_ERROR(php_sock, "unable to retrieve socket option", errno);
+					RETURN_FALSE;
+				}
 #else
-			optlen = sizeof(int);
+				optlen = sizeof(int);
 
-			if (getsockopt(php_sock->bsd_socket, level, optname, (char*)&timeout, &optlen) != 0) {
-				PHP_SOCKET_ERROR(php_sock, "unable to retrieve socket option", errno);
-				RETURN_FALSE;
-			}
+				if (getsockopt(php_sock->bsd_socket, level, optname, (char*)&timeout, &optlen) != 0) {
+					PHP_SOCKET_ERROR(php_sock, "unable to retrieve socket option", errno);
+					RETURN_FALSE;
+				}
 
-			tv.tv_sec = timeout ? timeout / 1000 : 0;
-			tv.tv_usec = timeout ? (timeout * 1000) % 1000000 : 0;
+				tv.tv_sec = timeout ? timeout / 1000 : 0;
+				tv.tv_usec = timeout ? (timeout * 1000) % 1000000 : 0;
 #endif
 
-			array_init(return_value);
+				array_init(return_value);
 
-			add_assoc_long(return_value, "sec", tv.tv_sec);
-			add_assoc_long(return_value, "usec", tv.tv_usec);
-			break;
-
-		default:
-			optlen = sizeof(other_val);
-
-			if (getsockopt(php_sock->bsd_socket, level, optname, (char*)&other_val, &optlen) != 0) {
-				PHP_SOCKET_ERROR(php_sock, "unable to retrieve socket option", errno);
-				RETURN_FALSE;
-			}
-			if (optlen == 1)
-				other_val = *((unsigned char *)&other_val);
-
-			RETURN_LONG(other_val);
-			break;
+				add_assoc_long(return_value, "sec", tv.tv_sec);
+				add_assoc_long(return_value, "usec", tv.tv_usec);
+				return;
+		}
 	}
+
+	optlen = sizeof(other_val);
+
+	if (getsockopt(php_sock->bsd_socket, level, optname, (char*)&other_val, &optlen) != 0) {
+		PHP_SOCKET_ERROR(php_sock, "unable to retrieve socket option", errno);
+		RETURN_FALSE;
+	}
+
+	if (optlen == 1) {
+		other_val = *((unsigned char *)&other_val);
+	}
+
+	RETURN_LONG(other_val);
 }
 /* }}} */
 
@@ -2573,7 +2582,14 @@ PHP_FUNCTION(socket_addrinfo_lookup)
 		ZEND_HASH_FOREACH_STR_KEY_VAL(Z_ARRVAL_P(zhints), key, hint) {
 			if (key) {
 				if (zend_string_equals_literal(key, "ai_flags")) {
-					hints.ai_flags = zval_get_long(hint);
+					zend_long flags = zval_get_long(hint);
+#if HAVE_AI_IDN
+					if (flags & (AI_IDN_ALLOW_UNASSIGNED | AI_IDN_USE_STD3_ASCII_RULES)) {
+						php_error_docref(NULL, E_DEPRECATED,
+							"AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES are deprecated");
+					}
+#endif
+					hints.ai_flags = flags;
 				} else if (zend_string_equals_literal(key, "ai_socktype")) {
 					hints.ai_socktype = zval_get_long(hint);
 				} else if (zend_string_equals_literal(key, "ai_protocol")) {

@@ -11,6 +11,14 @@ trigger:
       - UPGRADING
       - UPGRADING.INTERNALS
 
+schedules:
+  - cron: "0 1 * * *"
+    displayName: Nightly build
+    branches:
+      include:
+        - PHP-7.4
+        - master
+
 jobs:
   - template: azure/job.yml
     parameters:
@@ -75,3 +83,15 @@ jobs:
         configurationName: DEBUG_ZTS_MSAN
         configurationParameters: '--enable-debug --enable-zts'
         runTestsParameters: --asan
+    - template: azure/community_job.yml
+      parameters:
+        configurationName: COMMUNITY
+        configurationParameters: >-
+            --enable-debug --enable-maintainer-zts
+            CFLAGS='-fsanitize=undefined,address -fno-sanitize-recover -DZEND_TRACK_ARENA_ALLOC'
+            LDFLAGS='-fsanitize=undefined,address'
+    - template: azure/coverage_job.yml
+      parameters:
+        configurationName: COVERAGE_DEBUG_ZTS
+        configurationParameters: '--enable-debug --disable-maintainer-zts'
+        timeoutInMinutes: 90

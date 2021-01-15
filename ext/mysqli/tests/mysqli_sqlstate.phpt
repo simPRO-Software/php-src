@@ -8,27 +8,39 @@ require_once('skipifconnectfailure.inc');
 ?>
 --FILE--
 <?php
-	require_once("connect.inc");
+    require_once("connect.inc");
 
-	require('table.inc');
+    $tmp    = NULL;
+    $link   = NULL;
 
-	var_dump(mysqli_sqlstate($link));
-	mysqli_query($link, "SELECT unknown_column FROM test");
-	var_dump(mysqli_sqlstate($link));
-	mysqli_free_result(mysqli_query($link, "SELECT id FROM test"));
-	var_dump(mysqli_sqlstate($link));
+    if (!is_null($tmp = @mysqli_sqlstate()))
+        printf("[001] Expecting NULL, got %s/%s\n", gettype($tmp), $tmp);
 
-	mysqli_close($link);
+    if (!is_null($tmp = @mysqli_sqlstate($link)))
+        printf("[002] Expecting NULL, got %s/%s\n", gettype($tmp), $tmp);
 
-	var_dump(mysqli_sqlstate($link));
+    require('table.inc');
 
-	print "done!";
+    var_dump(@mysqli_sqlstate($link, "foo"));
+
+    var_dump(mysqli_sqlstate($link));
+    mysqli_query($link, "SELECT unknown_column FROM test");
+    var_dump(mysqli_sqlstate($link));
+    mysqli_free_result(mysqli_query($link, "SELECT id FROM test"));
+    var_dump(mysqli_sqlstate($link));
+
+    mysqli_close($link);
+
+    var_dump(mysqli_sqlstate($link));
+
+    print "done!";
 ?>
 --CLEAN--
 <?php
-	require_once("clean_table.inc");
+    require_once("clean_table.inc");
 ?>
 --EXPECTF--
+NULL
 %s(5) "00000"
 %s(5) "42S22"
 %s(5) "00000"

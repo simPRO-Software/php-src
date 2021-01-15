@@ -50,6 +50,12 @@ foreach ($export as $k => $test) {
 
 var_dump($passed);
 
+// Argument converted from int to GMP
+var_dump(bin2hex(gmp_export(0xff)));
+
+// Invalid arguments (zpp failure)
+var_dump(gmp_export());
+
 // Invalid word sizes
 var_dump(gmp_export(123, -1));
 var_dump(gmp_export(123, 0));
@@ -59,6 +65,10 @@ var_dump(gmp_export(123, 1, GMP_MSW_FIRST | GMP_LSW_FIRST));
 var_dump(gmp_export(123, 1, GMP_BIG_ENDIAN | GMP_LITTLE_ENDIAN));
 --EXPECTF--
 bool(true)
+string(2) "ff"
+
+Warning: gmp_export() expects at least 1 parameter, 0 given in %s on line %d
+NULL
 
 Warning: gmp_export(): Word size must be positive, -1 given in %s on line %d
 bool(false)

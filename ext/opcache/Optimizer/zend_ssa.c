@@ -448,7 +448,7 @@ static void place_essa_pis(
 			if ((pi = add_pi(arena, op_array, dfg, ssa, j, bt, var))) {
 				pi_type_mask(pi, mask_for_type_check(type));
 			}
-			if (type != IS_RESOURCE) {
+			if (type != MAY_BE_RESOURCE) {
 				/* is_resource() may return false for closed resources */
 				if ((pi = add_pi(arena, op_array, dfg, ssa, j, bf, var))) {
 					pi_not_type_mask(pi, mask_for_type_check(type));
@@ -1296,11 +1296,7 @@ static inline void zend_ssa_remove_phi_source(zend_ssa *ssa, zend_ssa_phi *phi, 
 	for (j = 0; j < predecessors_count; j++) {
 		if (phi->sources[j] == var_num) {
 			if (j < pred_offset) {
-				if (next_phi == NULL) {
-					next_phi = phi->use_chains[pred_offset];
-				} else {
-					ZEND_ASSERT(phi->use_chains[pred_offset] == NULL);
-				}
+				ZEND_ASSERT(next_phi == NULL);
 			} else if (j >= pred_offset) {
 				phi->use_chains[j] = next_phi;
 			}
@@ -1386,7 +1382,7 @@ void zend_ssa_remove_predecessor(zend_ssa *ssa, int from, int to) /* {{{ */
 	for (phi = next_ssa_block->phis; phi; phi = phi->next) {
 		if (phi->pi >= 0) {
 			if (phi->pi == from) {
-				zend_ssa_remove_uses_of_var(ssa, phi->ssa_var);
+				zend_ssa_rename_var_uses(ssa, phi->ssa_var, phi->sources[0], /* update_types */ 0);
 				zend_ssa_remove_phi(ssa, phi);
 			}
 		} else {
@@ -1589,6 +1585,8 @@ void zend_ssa_rename_var_uses(zend_ssa *ssa, int old, int new, zend_bool update_
 						new_var->phi_use_chain = phi;
 					}
 					after_first_new_source = 1;
+				} else {
+					phi->use_chains[j] = NULL;
 				}
 			}
 		}

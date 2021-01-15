@@ -2065,7 +2065,7 @@ static void soap_server_fault_ex(sdlFunctionPtr function, zval* fault, soapHeade
 	   our fault code with their own handling... Figure this out later
 	*/
 	if (use_http_error_status) {
-		sapi_add_header("HTTP/1.1 500 Internal Service Error", sizeof("HTTP/1.1 500 Internal Service Error")-1, 1);
+		sapi_add_header("HTTP/1.1 500 Internal Server Error", sizeof("HTTP/1.1 500 Internal Server Error")-1, 1);
 	}
 	if (zend_ini_long("zlib.output_compression", sizeof("zlib.output_compression"), 0)) {
 		sapi_add_header("Connection: close", sizeof("Connection: close")-1, 1);
@@ -2336,8 +2336,8 @@ PHP_METHOD(SoapClient, __construct)
 		}
 
 		if ((tmp = zend_hash_str_find(ht, "soap_version", sizeof("soap_version")-1)) != NULL) {
-			if (Z_TYPE_P(tmp) == IS_LONG ||
-			    (Z_LVAL_P(tmp) == SOAP_1_1 && Z_LVAL_P(tmp) == SOAP_1_2)) {
+			if (Z_TYPE_P(tmp) == IS_LONG &&
+			    (Z_LVAL_P(tmp) == SOAP_1_1 || Z_LVAL_P(tmp) == SOAP_1_2)) {
 				soap_version = Z_LVAL_P(tmp);
 			}
 		}
@@ -2579,7 +2579,7 @@ static int do_request(zval *this_ptr, xmlDoc *request, char *location, char *act
 		ret = FALSE;
 	}
 	return ret;
-} 
+}
 /* }}} */
 
 static void do_soap_call(zend_execute_data *execute_data,
@@ -3818,7 +3818,7 @@ static int serialize_response_call2(xmlNodePtr body, sdlFunctionPtr function, ch
 		*node = method;
 	}
 	return use;
-} 
+}
 /* }}} */
 
 static xmlDocPtr serialize_response_call(sdlFunctionPtr function, char *function_name, char *uri, zval *ret, soapHeader* headers, int version) /* {{{ */

@@ -171,6 +171,7 @@ PHP_FUNCTION(mysqli_autocommit)
 	MYSQLI_FETCH_RESOURCE_CONN(mysql, mysql_link, MYSQLI_STATUS_VALID);
 
 	if (mysql_autocommit(mysql->mysql, (my_bool)automode)) {
+		MYSQLI_REPORT_MYSQL_ERROR(mysql->mysql);
 		RETURN_FALSE;
 	}
 	RETURN_TRUE;
@@ -614,7 +615,7 @@ PHP_FUNCTION(mysqli_change_user)
 	size_t			user_len, password_len, dbname_len;
 	zend_ulong		rc;
 #if !defined(MYSQLI_USE_MYSQLND) && defined(HAVE_MYSQLI_SET_CHARSET)
-	const		CHARSET_INFO * old_charset;
+	MY_CHARSET_INFO old_charset;
 #endif
 
 	if (zend_parse_method_parameters(ZEND_NUM_ARGS(), getThis(), "Osss!", &mysql_link, mysqli_link_class_entry, &user, &user_len, &password, &password_len, &dbname, &dbname_len) == FAILURE) {
@@ -623,7 +624,7 @@ PHP_FUNCTION(mysqli_change_user)
 	MYSQLI_FETCH_RESOURCE_CONN(mysql, mysql_link, MYSQLI_STATUS_VALID);
 
 #if !defined(MYSQLI_USE_MYSQLND) && defined(HAVE_MYSQLI_SET_CHARSET)
-	old_charset = mysql->mysql->charset;
+	mysql_get_character_set_info(mysql->mysql, &old_charset);
 #endif
 
 #if defined(MYSQLI_USE_MYSQLND)
@@ -643,7 +644,7 @@ PHP_FUNCTION(mysqli_change_user)
 		  5.0 doesn't support it. Support added in 5.1.23 by fixing the following bug :
 		  Bug #30472 libmysql doesn't reset charset, insert_id after succ. mysql_change_user() call
 		*/
-		rc = mysql_set_character_set(mysql->mysql, old_charset->csname);
+		rc = mysql_set_character_set(mysql->mysql, old_charset.csname);
 	}
 #endif
 
@@ -754,6 +755,7 @@ PHP_FUNCTION(mysqli_commit)
 #else
 	if (FAIL == mysqlnd_commit(mysql->mysql, flags, name)) {
 #endif
+		MYSQLI_REPORT_MYSQL_ERROR(mysql->mysql);
 		RETURN_FALSE;
 	}
 	RETURN_TRUE;
@@ -1123,7 +1125,8 @@ void mysqli_stmt_fetch_mysqlnd(INTERNAL_FUNCTION_PARAMETERS)
 	}
 	MYSQLI_FETCH_RESOURCE_STMT(stmt, mysql_stmt, MYSQLI_STATUS_VALID);
 
-	if (FAIL  == mysqlnd_stmt_fetch(stmt->stmt, &fetched_anything)) {
+	if (FAIL == mysqlnd_stmt_fetch(stmt->stmt, &fetched_anything)) {
+		MYSQLI_REPORT_STMT_ERROR(stmt->stmt);
 		RETURN_BOOL(FALSE);
 	} else if (fetched_anything == TRUE) {
 		RETURN_BOOL(TRUE);
@@ -1605,13 +1608,11 @@ PHP_FUNCTION(mysqli_next_result) {
 	}
 	MYSQLI_FETCH_RESOURCE_CONN(mysql, mysql_link, MYSQLI_STATUS_VALID);
 
-	if (!mysql_more_results(mysql->mysql)) {
-		php_error_docref(NULL, E_STRICT, "There is no next result set. "
-						"Please, call mysqli_more_results()/mysqli::more_results() to check "
-						"whether to call this function/method");
+	if (mysql_next_result(mysql->mysql)) {
+		MYSQLI_REPORT_MYSQL_ERROR(mysql->mysql);
+		RETURN_FALSE;
 	}
-
-	RETURN_BOOL(!mysql_next_result(mysql->mysql));
+	RETURN_TRUE;
 }
 /* }}} */
 
@@ -1643,13 +1644,11 @@ PHP_FUNCTION(mysqli_stmt_next_result) {
 	}
 	MYSQLI_FETCH_RESOURCE_STMT(stmt, mysql_stmt, MYSQLI_STATUS_VALID);
 
-	if (!mysqlnd_stmt_more_results(stmt->stmt)) {
-		php_error_docref(NULL, E_STRICT, "There is no next result set. "
-						"Please, call mysqli_stmt_more_results()/mysqli_stmt::more_results() to check "
-						"whether to call this function/method");
+	if (mysql_stmt_next_result(stmt->stmt)) {
+		MYSQLI_REPORT_STMT_ERROR(stmt->stmt);
+		RETURN_FALSE;
 	}
-
-	RETURN_BOOL(!mysql_stmt_next_result(stmt->stmt));
+	RETURN_TRUE;
 }
 /* }}} */
 #endif
@@ -1713,10 +1712,12 @@ static int mysqli_options_get_option_zval_type(int option)
 #endif /* MySQL 4.1.0 */
 		case MYSQL_OPT_READ_TIMEOUT:
 		case MYSQL_OPT_WRITE_TIMEOUT:
+#ifdef MYSQL_OPT_GUESS_CONNECTION /* removed in MySQL-8.0 */
 		case MYSQL_OPT_GUESS_CONNECTION:
 		case MYSQL_OPT_USE_EMBEDDED_CONNECTION:
 		case MYSQL_OPT_USE_REMOTE_CONNECTION:
 		case MYSQL_SECURE_AUTH:
+#endif
 #ifdef MYSQL_OPT_RECONNECT
 		case MYSQL_OPT_RECONNECT:
 #endif /* MySQL 5.0.13 */
@@ -1726,16 +1727,13 @@ static int mysqli_options_get_option_zval_type(int option)
 #ifdef MYSQL_OPT_COMPRESS
 		case MYSQL_OPT_COMPRESS:
 #endif /* mysqlnd @ PHP 5.3.2 */
-#ifdef MYSQL_OPT_SSL_VERIFY_SERVER_CERT
-	REGISTER_LONG_CONSTANT("MYSQLI_OPT_SSL_VERIFY_SERVER_CERT", MYSQL_OPT_SSL_VERIFY_SERVER_CERT, CONST_CS | CONST_PERSISTENT);
-#endif /* MySQL 5.1.1., mysqlnd @ PHP 5.3.3 */
 #if (MYSQL_VERSION_ID >= 50611 && defined(CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS)) || defined(MYSQLI_USE_MYSQLND)
 		case MYSQL_OPT_CAN_HANDLE_EXPIRED_PASSWORDS:
 #endif
 			return IS_LONG;
 
 #ifdef MYSQL_SHARED_MEMORY_BASE_NAME
-                case MYSQL_SHARED_MEMORY_BASE_NAME:
+		case MYSQL_SHARED_MEMORY_BASE_NAME:
 #endif /* MySQL 4.1.0 */
 #ifdef MYSQL_SET_CLIENT_IP
 		case MYSQL_SET_CLIENT_IP:
@@ -1954,6 +1952,11 @@ PHP_FUNCTION(mysqli_real_query)
 }
 /* }}} */
 
+#if defined(MYSQLI_USE_MYSQLND) || MYSQL_VERSION_ID < 50707 || defined(MARIADB_BASE_VERSION)
+# define mysql_real_escape_string_quote(mysql, to, from, length, quote) \
+	mysql_real_escape_string(mysql, to, from, length)
+#endif
+
 /* {{{ proto string mysqli_real_escape_string(object link, string escapestr)
    Escapes special characters in a string for use in a SQL statement, taking into account the current charset of the connection */
 PHP_FUNCTION(mysqli_real_escape_string) {
@@ -1969,7 +1972,7 @@ PHP_FUNCTION(mysqli_real_escape_string) {
 	MYSQLI_FETCH_RESOURCE_CONN(mysql, mysql_link, MYSQLI_STATUS_VALID);
 
 	newstr = zend_string_alloc(2 * escapestr_len, 0);
-	ZSTR_LEN(newstr) = mysql_real_escape_string(mysql->mysql, ZSTR_VAL(newstr), escapestr, escapestr_len);
+	ZSTR_LEN(newstr) = mysql_real_escape_string_quote(mysql->mysql, ZSTR_VAL(newstr), escapestr, escapestr_len, '\'');
 	newstr = zend_string_truncate(newstr, ZSTR_LEN(newstr), 0);
 
 	RETURN_NEW_STR(newstr);
@@ -1996,6 +1999,7 @@ PHP_FUNCTION(mysqli_rollback)
 #else
 	if (FAIL == mysqlnd_rollback(mysql->mysql, flags, name)) {
 #endif
+		MYSQLI_REPORT_MYSQL_ERROR(mysql->mysql);
 		RETURN_FALSE;
 	}
 	RETURN_TRUE;
@@ -2326,7 +2330,7 @@ PHP_FUNCTION(mysqli_stmt_attr_set)
 #if MYSQL_VERSION_ID >= 50107
 	my_bool	mode_b;
 #endif
-	zend_ulong	mode;
+	unsigned long	mode;
 	zend_long	attr;
 	void	*mode_p;
 
@@ -2357,6 +2361,7 @@ PHP_FUNCTION(mysqli_stmt_attr_set)
 #else
 	if (FAIL == mysql_stmt_attr_set(stmt->stmt, attr, mode_p)) {
 #endif
+		MYSQLI_REPORT_STMT_ERROR(stmt->stmt);
 		RETURN_FALSE;
 	}
 	RETURN_TRUE;
@@ -2369,7 +2374,7 @@ PHP_FUNCTION(mysqli_stmt_attr_get)
 {
 	MY_STMT	*stmt;
 	zval	*mysql_stmt;
-	zend_ulong	value = 0;
+	unsigned long	value = 0;
 	zend_long	attr;
 	int		rc;
 
@@ -2386,7 +2391,7 @@ PHP_FUNCTION(mysqli_stmt_attr_get)
 	if (attr == STMT_ATTR_UPDATE_MAX_LENGTH)
 		value = *((my_bool *)&value);
 #endif
-	RETURN_LONG((zend_ulong)value);
+	RETURN_LONG((unsigned long)value);
 }
 /* }}} */
 

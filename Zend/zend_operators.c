@@ -909,7 +909,7 @@ ZEND_API zend_string* ZEND_FASTCALL zval_try_get_string_func(zval *op) /* {{{ */
 
 static zend_never_inline void ZEND_FASTCALL add_function_array(zval *result, zval *op1, zval *op2) /* {{{ */
 {
-	if ((result == op1) && (result == op2)) {
+	if (result == op1 && Z_ARR_P(op1) == Z_ARR_P(op2)) {
 		/* $a += $a */
 		return;
 	}
@@ -1199,12 +1199,18 @@ ZEND_API int ZEND_FASTCALL pow_function(zval *result, zval *op1, zval *op2) /* {
 
 				if (EXPECTED(op1 != op2)) {
 					if (Z_TYPE_P(op1) == IS_ARRAY) {
+						if (op1 == result) {
+							zval_ptr_dtor(result);
+						}
 						ZVAL_LONG(result, 0);
 						return SUCCESS;
 					} else {
 						op1 = zendi_convert_scalar_to_number(op1, &op1_copy, result, 0);
 					}
 					if (Z_TYPE_P(op2) == IS_ARRAY) {
+						if (op1 == result) {
+							zval_ptr_dtor(result);
+						}
 						ZVAL_LONG(result, 1L);
 						return SUCCESS;
 					} else {
@@ -1212,6 +1218,9 @@ ZEND_API int ZEND_FASTCALL pow_function(zval *result, zval *op1, zval *op2) /* {
 					}
 				} else {
 					if (Z_TYPE_P(op1) == IS_ARRAY) {
+						if (op1 == result) {
+							zval_ptr_dtor(result);
+						}
 						ZVAL_LONG(result, 0);
 						return SUCCESS;
 					} else {
@@ -1837,6 +1846,9 @@ ZEND_API int ZEND_FASTCALL concat_function(zval *result, zval *op1, zval *op2) /
 		}
 	} else if (UNEXPECTED(Z_STRLEN_P(op2) == 0)) {
 		if (EXPECTED(result != op1)) {
+			if (result == orig_op1) {
+				i_zval_ptr_dtor(result);
+			}
 			ZVAL_COPY(result, op1);
 		}
 	} else {
@@ -2262,30 +2274,14 @@ ZEND_API int ZEND_FASTCALL is_smaller_or_equal_function(zval *result, zval *op1,
 }
 /* }}} */
 
-static zend_bool ZEND_FASTCALL instanceof_interface_only(const zend_class_entry *instance_ce, const zend_class_entry *ce) /* {{{ */
-{
-	uint32_t i;
-
-	if (instance_ce->num_interfaces) {
-		ZEND_ASSERT(instance_ce->ce_flags & ZEND_ACC_RESOLVED_INTERFACES);
-		for (i = 0; i < instance_ce->num_interfaces; i++) {
-			if (instanceof_interface_only(instance_ce->interfaces[i], ce)) {
-				return 1;
-			}
-		}
-	}
-	return 0;
-}
-/* }}} */
-
 static zend_always_inline zend_bool instanceof_class(const zend_class_entry *instance_ce, const zend_class_entry *ce) /* {{{ */
 {
-	while (instance_ce) {
+	do {
 		if (instance_ce == ce) {
 			return 1;
 		}
 		instance_ce = instance_ce->parent;
-	}
+	} while (instance_ce);
 	return 0;
 }
 /* }}} */
@@ -2297,30 +2293,25 @@ static zend_bool ZEND_FASTCALL instanceof_interface(const zend_class_entry *inst
 	if (instance_ce->num_interfaces) {
 		ZEND_ASSERT(instance_ce->ce_flags & ZEND_ACC_RESOLVED_INTERFACES);
 		for (i = 0; i < instance_ce->num_interfaces; i++) {
-			if (instanceof_interface(instance_ce->interfaces[i], ce)) {
+			if (instance_ce->interfaces[i] == ce) {
 				return 1;
 			}
 		}
 	}
-	return instanceof_class(instance_ce, ce);
+	return instance_ce == ce;
 }
 /* }}} */
 
-ZEND_API zend_bool ZEND_FASTCALL instanceof_function_ex(const zend_class_entry *instance_ce, const zend_class_entry *ce, zend_bool interfaces_only) /* {{{ */
+// TODO: It would make more sense to expose instanceof_class + instanceof_interface instead
+ZEND_API zend_bool ZEND_FASTCALL instanceof_function_ex(const zend_class_entry *instance_ce, const zend_class_entry *ce, zend_bool is_interface) /* {{{ */
 {
-	if (ce->ce_flags & ZEND_ACC_INTERFACE) {
-		if (!interfaces_only) {
-			if (instanceof_interface_only(instance_ce, ce)) {
-				return 1;
-			}
-		} else {
-			return instanceof_interface(instance_ce, ce);
-		}
-	}
-	if (!interfaces_only) {
+	if (is_interface) {
+		ZEND_ASSERT(ce->ce_flags & ZEND_ACC_INTERFACE);
+		return instanceof_interface(instance_ce, ce);
+	} else {
+		ZEND_ASSERT(!(ce->ce_flags & ZEND_ACC_INTERFACE));
 		return instanceof_class(instance_ce, ce);
 	}
-	return 0;
 }
 /* }}} */
 
@@ -3053,6 +3044,9 @@ process_double:
 		}
 		if (allow_errors == -1) {
 			zend_error(E_NOTICE, "A non well formed numeric value encountered");
+			if (EG(exception)) {
+				return 0;
+			}
 		}
 	}
 

@@ -266,6 +266,9 @@ PHP_CLI_API ssize_t sapi_cli_single_write(const char *str, size_t str_length) /*
 	} while (ret <= 0 && errno == EAGAIN && sapi_cli_select(STDOUT_FILENO));
 #else
 	ret = fwrite(str, 1, MIN(str_length, 16384), stdout);
+	if (ret == 0 && ferror(stdout)) {
+		return -1;
+	}
 #endif
 	return ret;
 }
@@ -1084,7 +1087,8 @@ static int do_cli(int argc, char **argv) /* {{{ */
 						zval_ptr_dtor(&tmp);
 						EG(exception) = NULL;
 					} else {
-						zend_call_method_with_1_params(NULL, reflection_ptr, NULL, "export", NULL, &ref);
+						zend_print_zval(&ref, 0);
+						zend_write("\n", 1);
 					}
 					zval_ptr_dtor(&ref);
 					zval_ptr_dtor(&arg);
@@ -1227,7 +1231,7 @@ int main(int argc, char *argv[])
 	setmode(_fileno(stderr), O_BINARY);		/* make the stdio mode be binary */
 #endif
 
-	while ((c = php_getopt(argc, argv, OPTIONS, &php_optarg, &php_optind, 0, 2))!=-1) {
+	while ((c = php_getopt(argc, argv, OPTIONS, &php_optarg, &php_optind, 1, 2))!=-1) {
 		switch (c) {
 			case 'c':
 				if (ini_path_override) {
@@ -1278,6 +1282,10 @@ int main(int argc, char *argv[])
 			case 'h': /* help & quit */
 			case '?':
 				php_cli_usage(argv[0]);
+				goto out;
+			case PHP_GETOPT_INVALID_ARG: /* print usage on bad options, exit 1 */
+				php_cli_usage(argv[0]);
+				exit_status = 1;
 				goto out;
 			case 'i': case 'v': case 'm':
 				sapi_module = &cli_sapi_module;

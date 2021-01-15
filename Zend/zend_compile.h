@@ -229,7 +229,7 @@ typedef struct _zend_oparray_context {
 /* op_array or class is preloaded                         |     |     |     */
 #define ZEND_ACC_PRELOADED               (1 << 10) /*  X  |  X  |     |     */
 /*                                                        |     |     |     */
-/* Class Flags (unused: 16...)                            |     |     |     */
+/* Class Flags (unused: 24...)                            |     |     |     */
 /* ===========                                            |     |     |     */
 /*                                                        |     |     |     */
 /* Special class types                                    |     |     |     */
@@ -278,7 +278,13 @@ typedef struct _zend_oparray_context {
 /* Class has unresolved variance obligations.             |     |     |     */
 #define ZEND_ACC_UNRESOLVED_VARIANCE     (1 << 21) /*  X  |     |     |     */
 /*                                                        |     |     |     */
-/* Function Flags (unused: 28...30)                       |     |     |     */
+/* Class is linked apart from variance obligations.       |     |     |     */
+#define ZEND_ACC_NEARLY_LINKED           (1 << 22) /*  X  |     |     |     */
+/*                                                        |     |     |     */
+/* Whether this class was used in its unlinked state.     |     |     |     */
+#define ZEND_ACC_HAS_UNLINKED_USES       (1 << 23) /*  X  |     |     |     */
+/*                                                        |     |     |     */
+/* Function Flags (unused: 23, 26)                        |     |     |     */
 /* ==============                                         |     |     |     */
 /*                                                        |     |     |     */
 /* deprecation flag                                       |     |     |     */
@@ -314,15 +320,16 @@ typedef struct _zend_oparray_context {
 /* run_time_cache allocated on heap (user only)           |     |     |     */
 #define ZEND_ACC_HEAP_RT_CACHE           (1 << 22) /*     |  X  |     |     */
 /*                                                        |     |     |     */
-/* method flag used by Closure::__invoke()                |     |     |     */
-#define ZEND_ACC_USER_ARG_INFO           (1 << 23) /*     |  X  |     |     */
+/* method flag used by Closure::__invoke() (int only)     |     |     |     */
+#define ZEND_ACC_USER_ARG_INFO           (1 << 22) /*     |  X  |     |     */
 /*                                                        |     |     |     */
 #define ZEND_ACC_GENERATOR               (1 << 24) /*     |  X  |     |     */
 /*                                                        |     |     |     */
+/* function was processed by pass two (user only)         |     |     |     */
 #define ZEND_ACC_DONE_PASS_TWO           (1 << 25) /*     |  X  |     |     */
 /*                                                        |     |     |     */
 /* internal function is allocated at arena (int only)     |     |     |     */
-#define ZEND_ACC_ARENA_ALLOCATED         (1 << 26) /*     |  X  |     |     */
+#define ZEND_ACC_ARENA_ALLOCATED         (1 << 25) /*     |  X  |     |     */
 /*                                                        |     |     |     */
 /* op_array is a clone of trait method                    |     |     |     */
 #define ZEND_ACC_TRAIT_CLONE             (1 << 27) /*     |  X  |     |     */
@@ -362,7 +369,7 @@ typedef struct _zend_property_info {
 #define OBJ_PROP_NUM(obj, num) \
 	(&(obj)->properties_table[(num)])
 #define OBJ_PROP_TO_OFFSET(num) \
-	((uint32_t)(zend_uintptr_t)OBJ_PROP_NUM(((zend_object*)NULL), num))
+	((uint32_t)(XtOffsetOf(zend_object, properties_table) + sizeof(zval) * (num)))
 #define OBJ_PROP_TO_NUM(offset) \
 	((offset - OBJ_PROP_TO_OFFSET(0)) / sizeof(zval))
 
@@ -859,6 +866,7 @@ void zend_assert_valid_class_name(const zend_string *const_name);
 #define ZEND_FETCH_CLASS_SILENT      0x0100
 #define ZEND_FETCH_CLASS_EXCEPTION   0x0200
 #define ZEND_FETCH_CLASS_ALLOW_UNLINKED 0x0400
+#define ZEND_FETCH_CLASS_ALLOW_NEARLY_LINKED 0x0800
 
 #define ZEND_PARAM_REF      (1<<0)
 #define ZEND_PARAM_VARIADIC (1<<1)
@@ -1074,6 +1082,9 @@ END_EXTERN_C()
 
 /* disable jumptable optimization for switch statements */
 #define ZEND_COMPILE_NO_JUMPTABLES				(1<<16)
+
+/* this flag is set when compiler invoked during preloading in separate process */
+#define ZEND_COMPILE_PRELOAD_IN_CHILD           (1<<17)
 
 /* The default value for CG(compiler_options) */
 #define ZEND_COMPILE_DEFAULT					ZEND_COMPILE_HANDLE_OP_ARRAY

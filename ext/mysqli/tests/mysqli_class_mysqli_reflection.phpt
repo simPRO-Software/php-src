@@ -12,15 +12,15 @@ Most of the things which we test are covered by mysqli_class_*_interface.phpt.
 Those tests go into the details and are aimed to be a development tool, no more.
 */
 if (!$IS_MYSQLND)
-	die("skip Test has been written for mysqlnd only");
+    die("skip Test has been written for mysqlnd only");
 
 ?>
 --FILE--
 <?php
-	require_once('reflection_tools.inc');
-	$class = new ReflectionClass('mysqli');
-	inspectClass($class);
-	print "done!\n";
+    require_once('reflection_tools.inc');
+    $class = new ReflectionClass('mysqli');
+    inspectClass($class);
+    print "done!\n";
 ?>
 --EXPECT--
 Inspecting class 'mysqli'

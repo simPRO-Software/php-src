@@ -8,27 +8,36 @@ require_once('skipifconnectfailure.inc');
 ?>
 --FILE--
 <?php
-	require_once("connect.inc");
+    require_once("connect.inc");
 
-	require('table.inc');
+    $tmp    = NULL;
+    $link   = NULL;
 
-	var_dump(mysqli_ping($link));
+    if (!is_null($tmp = @mysqli_ping()))
+        printf("[001] Expecting NULL, got %s/%s\n", gettype($tmp), $tmp);
 
-	// provoke an error to check if mysqli_ping resets it
-	$res = mysqli_query($link, 'SELECT * FROM unknown_table');
-	if (!($errno = mysqli_errno($link)))
-		printf("[003] Statement should have caused an error\n");
+    require('table.inc');
 
-	var_dump(mysqli_ping($link));
-	if ($errno === mysqli_errno($link))
-		printf("[004] Error codes should have been reset\n");
+    if (!is_null($tmp = @mysqli_ping($link, $link)))
+        printf("[002] Expecting NULL, got %s/%s\n", gettype($tmp), $tmp);
 
-	mysqli_close($link);
+    var_dump(mysqli_ping($link));
 
-	if (false !== ($tmp = mysqli_ping($link)))
-		printf("[005] Expecting false, got %s/%s\n", gettype($tmp), $tmp);
+    // provoke an error to check if mysqli_ping resets it
+    $res = mysqli_query($link, 'SELECT * FROM unknown_table');
+    if (!($errno = mysqli_errno($link)))
+        printf("[003] Statement should have caused an error\n");
 
-	print "done!";
+    var_dump(mysqli_ping($link));
+    if ($errno === mysqli_errno($link))
+        printf("[004] Error codes should have been reset\n");
+
+    mysqli_close($link);
+
+    if (false !== ($tmp = mysqli_ping($link)))
+        printf("[005] Expecting false, got %s/%s\n", gettype($tmp), $tmp);
+
+    print "done!";
 ?>
 --EXPECTF--
 bool(true)

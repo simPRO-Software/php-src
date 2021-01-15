@@ -3827,10 +3827,6 @@ static EVP_PKEY * php_openssl_evp_from_zval(
 		if (!what) {
 			TMP_CLEAN;
 		}
-		if (resourceval) {
-			*resourceval = res;
-			Z_ADDREF_P(val);
-		}
 		if (res->type == le_x509) {
 			/* extract key from cert, depending on public_key param */
 			cert = (X509*)what;
@@ -3854,6 +3850,10 @@ static EVP_PKEY * php_openssl_evp_from_zval(
 					zval_ptr_dtor_str(&tmp);
 				}
 				/* got the key - return it */
+				if (resourceval) {
+					*resourceval = res;
+					Z_ADDREF_P(val);
+				}
 				return (EVP_PKEY*)what;
 			}
 		} else {
@@ -4738,7 +4738,6 @@ PHP_FUNCTION(openssl_pkey_get_public)
 		RETURN_FALSE;
 	}
 	ZVAL_RES(return_value, res);
-	Z_ADDREF_P(return_value);
 }
 /* }}} */
 
@@ -4780,7 +4779,6 @@ PHP_FUNCTION(openssl_pkey_get_private)
 		RETURN_FALSE;
 	}
 	ZVAL_RES(return_value, res);
-	Z_ADDREF_P(return_value);
 }
 
 /* }}} */
@@ -6477,6 +6475,8 @@ PHP_FUNCTION(openssl_digest)
 struct php_openssl_cipher_mode {
 	zend_bool is_aead;
 	zend_bool is_single_run_aead;
+	zend_bool set_tag_length_always;
+	zend_bool set_tag_length_when_encrypting;
 	int aead_get_tag_flag;
 	int aead_set_tag_flag;
 	int aead_ivlen_flag;
@@ -6484,27 +6484,45 @@ struct php_openssl_cipher_mode {
 
 static void php_openssl_load_cipher_mode(struct php_openssl_cipher_mode *mode, const EVP_CIPHER *cipher_type) /* {{{ */
 {
-	switch (EVP_CIPHER_mode(cipher_type)) {
-#ifdef EVP_CIPH_GCM_MODE
+	int cipher_mode = EVP_CIPHER_mode(cipher_type);
+	memset(mode, 0, sizeof(struct php_openssl_cipher_mode));
+	switch (cipher_mode) {
+#ifdef EVP_CIPH_OCB_MODE
+		/* Since OpenSSL 1.1, all AEAD ciphers use a common framework. We check for
+		 * EVP_CIPH_OCB_MODE, because LibreSSL does not support it. */
+		case EVP_CIPH_GCM_MODE:
+		case EVP_CIPH_OCB_MODE:
+		case EVP_CIPH_CCM_MODE:
+			mode->is_aead = 1;
+			/* For OCB mode, explicitly set the tag length even when decrypting,
+			 * see https://github.com/openssl/openssl/issues/8331. */
+			mode->set_tag_length_always = cipher_mode == EVP_CIPH_OCB_MODE;
+			mode->set_tag_length_when_encrypting = cipher_mode == EVP_CIPH_CCM_MODE;
+			mode->is_single_run_aead = cipher_mode == EVP_CIPH_CCM_MODE;
+			mode->aead_get_tag_flag = EVP_CTRL_AEAD_GET_TAG;
+			mode->aead_set_tag_flag = EVP_CTRL_AEAD_SET_TAG;
+			mode->aead_ivlen_flag = EVP_CTRL_AEAD_SET_IVLEN;
+			break;
+#else
+# ifdef EVP_CIPH_GCM_MODE
 		case EVP_CIPH_GCM_MODE:
 			mode->is_aead = 1;
-			mode->is_single_run_aead = 0;
 			mode->aead_get_tag_flag = EVP_CTRL_GCM_GET_TAG;
 			mode->aead_set_tag_flag = EVP_CTRL_GCM_SET_TAG;
 			mode->aead_ivlen_flag = EVP_CTRL_GCM_SET_IVLEN;
 			break;
-#endif
-#ifdef EVP_CIPH_CCM_MODE
+# endif
+# ifdef EVP_CIPH_CCM_MODE
 		case EVP_CIPH_CCM_MODE:
 			mode->is_aead = 1;
 			mode->is_single_run_aead = 1;
+			mode->set_tag_length_when_encrypting = 1;
 			mode->aead_get_tag_flag = EVP_CTRL_CCM_GET_TAG;
 			mode->aead_set_tag_flag = EVP_CTRL_CCM_SET_TAG;
 			mode->aead_ivlen_flag = EVP_CTRL_CCM_SET_IVLEN;
 			break;
+# endif
 #endif
-		default:
-			memset(mode, 0, sizeof(struct php_openssl_cipher_mode));
 	}
 }
 /* }}} */
@@ -6514,16 +6532,16 @@ static int php_openssl_validate_iv(char **piv, size_t *piv_len, size_t iv_requir
 {
 	char *iv_new;
 
-	/* Best case scenario, user behaved */
-	if (*piv_len == iv_required_len) {
-		return SUCCESS;
-	}
-
 	if (mode->is_aead) {
 		if (EVP_CIPHER_CTX_ctrl(cipher_ctx, mode->aead_ivlen_flag, *piv_len, NULL) != 1) {
 			php_error_docref(NULL, E_WARNING, "Setting of IV length for AEAD mode failed");
 			return FAILURE;
 		}
+		return SUCCESS;
+	}
+
+	/* Best case scenario, user behaved */
+	if (*piv_len == iv_required_len) {
 		return SUCCESS;
 	}
 
@@ -6586,12 +6604,13 @@ static int php_openssl_cipher_init(const EVP_CIPHER *cipher_type,
 	if (php_openssl_validate_iv(piv, piv_len, max_iv_len, free_iv, cipher_ctx, mode) == FAILURE) {
 		return FAILURE;
 	}
-	if (mode->is_single_run_aead && enc) {
+	if (mode->set_tag_length_always || (enc && mode->set_tag_length_when_encrypting)) {
 		if (!EVP_CIPHER_CTX_ctrl(cipher_ctx, mode->aead_set_tag_flag, tag_len, NULL)) {
 			php_error_docref(NULL, E_WARNING, "Setting tag length for AEAD cipher failed");
 			return FAILURE;
 		}
-	} else if (!enc && tag && tag_len > 0) {
+	}
+	if (!enc && tag && tag_len > 0) {
 		if (!mode->is_aead) {
 			php_error_docref(NULL, E_WARNING, "The tag cannot be used because the cipher method does not support AEAD");
 		} else if (!EVP_CIPHER_CTX_ctrl(cipher_ctx, mode->aead_set_tag_flag, tag_len, (unsigned char *) tag)) {
@@ -6737,8 +6756,6 @@ PHP_OPENSSL_API zend_string* php_openssl_encrypt(char *data, size_t data_len, ch
 			}
 		} else if (tag) {
 			ZEND_TRY_ASSIGN_REF_NULL(tag);
-			php_error_docref(NULL, E_WARNING,
-					"The authenticated tag cannot be provided for cipher that doesn not support AEAD");
 		} else if (mode.is_aead) {
 			php_error_docref(NULL, E_WARNING, "A tag should be provided when using AEAD mode");
 			zend_string_release_ex(outbuf, 0);

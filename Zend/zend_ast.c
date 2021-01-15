@@ -451,7 +451,7 @@ static int zend_ast_add_unpacked_element(zval *result, zval *expr) {
 		HashTable *ht = Z_ARRVAL_P(expr);
 		zval *val;
 		zend_string *key;
-		
+
 		ZEND_HASH_FOREACH_STR_KEY_VAL(ht, key, val) {
 			if (key) {
 				zend_throw_error(NULL, "Cannot unpack array with string keys");
@@ -1225,7 +1225,7 @@ tail_call:
 		} else {
 			zend_ast_export_indent(str, indent);
 			smart_str_appends(str, "} else ");
-			if (ast->child[1]->kind == ZEND_AST_IF) {
+			if (ast->child[1] && ast->child[1]->kind == ZEND_AST_IF) {
 				list = (zend_ast_list*)ast->child[1];
 				goto tail_call;
 			} else {
@@ -1558,7 +1558,7 @@ simple_list:
 			}
 			break;
 		case ZEND_AST_TYPE:
-			switch (ast->attr) {
+			switch (ast->attr & ~ZEND_TYPE_NULLABLE) {
 				case IS_ARRAY:    APPEND_STR("array");
 				case IS_CALLABLE: APPEND_STR("callable");
 				EMPTY_SWITCH_DEFAULT_CASE();

@@ -17,7 +17,7 @@ dnl Basic autoconf initialization, generation of config.nice.
 dnl ----------------------------------------------------------------------------
 
 AC_PREREQ([2.68])
-AC_INIT([PHP],[8.0.0-dev],[https://bugs.php.net],[php],[https://www.php.net])
+AC_INIT([PHP],[7.4.13-dev],[https://bugs.php.net],[php],[https://www.php.net])
 AC_CONFIG_SRCDIR([main/php_version.h])
 AC_CONFIG_AUX_DIR([build])
 AC_PRESERVE_HELP_ORDER
@@ -109,7 +109,7 @@ extern "C++" {
 ])
 
 ac_IFS=$IFS; IFS="."
-set $(echo AC_PACKAGE_VERSION | $SED 's/\([[0-9\.]]*\)\(.*\)/\1\.\2/')
+set $(echo AC_PACKAGE_VERSION | "${SED}" 's/\([[0-9\.]]*\)\(.*\)/\1\.\2/')
 IFS=$ac_IFS
 PHP_MAJOR_VERSION=[$]1
 PHP_MINOR_VERSION=[$]2
@@ -178,7 +178,6 @@ PKG_PROG_PKG_CONFIG
 AC_PROG_CC([cc gcc])
 PHP_DETECT_ICC
 PHP_DETECT_SUNCC
-AC_PROG_CC_C99
 AC_PROG_CPP
 AC_USE_SYSTEM_EXTENSIONS
 AC_PROG_LN_S
@@ -350,7 +349,7 @@ if test -z "$PHP_INSTALLED_SAPIS"; then
 fi
 
 dnl Force ZTS.
-if test "$enable_zts" = "yes"; then
+if test "$enable_maintainer_zts" = "yes"; then
   dnl Add pthreads linker and compiler flags.
   if test -n "$ac_cv_pthreads_lib"; then
     LIBS="$LIBS -l$ac_cv_pthreads_lib"
@@ -413,6 +412,7 @@ dnl Then headers.
 dnl ----------------------------------------------------------------------------
 
 dnl QNX requires unix.h to allow functions in libunix to work properly.
+dnl locale.h is checked for supporting old code in extensions such as imagick.
 AC_CHECK_HEADERS([ \
 inttypes.h \
 stdint.h \
@@ -430,6 +430,7 @@ fcntl.h \
 grp.h \
 ieeefp.h \
 langinfo.h \
+locale.h \
 malloc.h \
 monetary.h \
 netdb.h \
@@ -439,6 +440,7 @@ resolv.h \
 strings.h \
 syslog.h \
 sysexits.h \
+sys/auxv.h \
 sys/ioctl.h \
 sys/file.h \
 sys/mman.h \
@@ -660,6 +662,7 @@ dnl getaddrinfo.
 AC_CACHE_CHECK([for getaddrinfo], ac_cv_func_getaddrinfo,
 [AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <netdb.h>]],
   [[struct addrinfo *g,h;g=&h;getaddrinfo("","",g,&g);]])],[AC_RUN_IFELSE([AC_LANG_SOURCE([[
+#include <string.h>
 #include <netdb.h>
 #include <sys/types.h>
 #ifndef AF_INET
@@ -672,11 +675,11 @@ int main(void) {
   hints.ai_flags = AI_NUMERICHOST;
 
   if (getaddrinfo("127.0.0.1", 0, &hints, &ai) < 0) {
-    exit(1);
+    return 1;
   }
 
   if (ai == 0) {
-    exit(1);
+    return 1;
   }
 
   pai = ai;
@@ -684,16 +687,16 @@ int main(void) {
   while (pai) {
     if (pai->ai_family != AF_INET) {
       /* 127.0.0.1/NUMERICHOST should only resolve ONE way */
-      exit(1);
+      return 1;
     }
     if (pai->ai_addr->sa_family != AF_INET) {
       /* 127.0.0.1/NUMERICHOST should only resolve ONE way */
-      exit(1);
+      return 1;
     }
     pai = pai->ai_next;
   }
   freeaddrinfo(ai);
-  exit(0);
+  return 0;
 }
   ]])],[ac_cv_func_getaddrinfo=yes], [ac_cv_func_getaddrinfo=no], [ac_cv_func_getaddrinfo=no])],
 [ac_cv_func_getaddrinfo=no])])
@@ -718,6 +721,12 @@ if test "x$php_crypt_r" = "x1"; then
   PHP_CRYPT_R_STYLE
 fi
 
+AC_CACHE_CHECK([for aarch64 CRC32 API], ac_cv_func___crc32d,
+[AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <arm_acle.h>]],[[__crc32d(0, 0);]])],[ac_cv_func___crc32d=yes],[ac_cv_func___crc32d="no"])])
+if test "$ac_cv_func___crc32d" = "yes"; then
+  AC_DEFINE([HAVE_AARCH64_CRC32], [1], [Define when aarch64 CRC32 API is available.])
+fi
+
 dnl Check for asm goto support.
 AC_CACHE_CHECK([for asm goto], ac_cv__asm_goto,
 [AC_RUN_IFELSE([AC_LANG_SOURCE([[
@@ -734,20 +743,6 @@ end:
 
 if test "$ac_cv__asm_goto" = yes; then
   AC_DEFINE(HAVE_ASM_GOTO,1,[Define if asm goto support])
-fi
-
-dnl Check for variable length array support.
-AC_CACHE_CHECK([whether compiler supports VLA], ac_cv__compiler_c99_vla,
-[AC_RUN_IFELSE([AC_LANG_SOURCE([[
- #include <stdlib.h>
- int main(void) {
-         int i[rand()%10];
-	 return 0;
- }
- ]])],[ac_cv__compiler_c99_vla=yes], [ac_cv__compiler_c99_vla=no], [ac_cv__compiler_c99_vla=no])])
-
-if test "$ac_cv__compiler_c99_vla" = yes; then
-	AC_DEFINE(HAVE_COMPILER_C99_VLA, 1, [Compiler supports VLA])
 fi
 
 dnl Check valgrind support.
@@ -780,7 +775,7 @@ PHP_HELP_SEPARATOR([General settings:])
 PHP_ARG_ENABLE([gcov],
   [whether to include gcov symbols],
   [AS_HELP_STRING([--enable-gcov],
-    [Enable GCOV code coverage (requires LTP) - FOR DEVELOPERS ONLY!!])],
+    [Enable GCOV code coverage - FOR DEVELOPERS ONLY!!])],
   [no],
   [no])
 
@@ -800,61 +795,13 @@ if test "$PHP_GCOV" = "yes"; then
     AC_MSG_ERROR([ccache must be disabled when --enable-gcov option is used. You can disable ccache by setting environment variable CCACHE_DISABLE=1.])
   fi
 
-  dnl Min: 1.5 (i.e. 105, major * 100 + minor for easier comparison).
-  ltp_version_min="105"
-  dnl Non-working versions, e.g. "1.8 1.18";
-  dnl Remove "none" when introducing the first incompatible LTP version and
-  dnl separate any following additions by spaces.
-  ltp_version_exclude="1.8"
-
-  AC_CHECK_PROG(LTP, lcov, lcov)
-  AC_CHECK_PROG(LTP_GENHTML, genhtml, genhtml)
-  PHP_SUBST(LTP)
-  PHP_SUBST(LTP_GENHTML)
-
-  if test "$LTP"; then
-    AC_CACHE_CHECK([for ltp version], php_cv_ltp_version, [
-      php_cv_ltp_version=invalid
-      ltp_version_vars=`$LTP -v 2>/dev/null | $SED -e 's/^.* //' -e 's/\./ /g' | tr -d a-z`
-      if test -n "$ltp_version_vars"; then
-        set $ltp_version_vars
-        ltp_version="${1}.${2}"
-        ltp_version_num="`expr ${1} \* 100 + ${2}`"
-        if test $ltp_version_num -ge $ltp_version_min; then
-          php_cv_ltp_version="$ltp_version (ok)"
-          for ltp_check_version in $ltp_version_exclude; do
-            if test "$ltp_version" = "$ltp_check_version"; then
-              php_cv_ltp_version=invalid
-              break
-            fi
-          done
-        fi
-      fi
-    ])
-  else
-    ltp_msg="To enable code coverage reporting you must have LTP installed"
-    AC_MSG_ERROR([$ltp_msg])
-  fi
-
-  case $php_cv_ltp_version in
-    ""|invalid[)]
-      ltp_msg="This LTP version is not supported (found: $ltp_version, min: $ltp_version_min, excluded: $ltp_version_exclude)."
-      AC_MSG_ERROR([$ltp_msg])
-      LTP="exit 0;"
-      ;;
-  esac
-
-  if test -z "$LTP_GENHTML"; then
-    AC_MSG_ERROR([Could not find genhtml from the LTP package])
-  fi
-
   AC_DEFINE(HAVE_GCOV, 1, [Whether you have gcov])
   PHP_ADD_MAKEFILE_FRAGMENT($abs_srcdir/build/Makefile.gcov, $abs_srcdir)
 
   dnl Remove all optimization flags from CFLAGS.
   changequote({,})
-  CFLAGS=`echo "$CFLAGS" | $SED -e 's/-O[0-9s]*//g'`
-  CXXFLAGS=`echo "$CXXFLAGS" | $SED -e 's/-O[0-9s]*//g'`
+  CFLAGS=`echo "$CFLAGS" | "${SED}" -e 's/-O[0-9s]*//g'`
+  CXXFLAGS=`echo "$CXXFLAGS" | "${SED}" -e 's/-O[0-9s]*//g'`
   changequote([,])
 
   dnl Add the special gcc flags.
@@ -873,8 +820,8 @@ if test "$PHP_DEBUG" = "yes"; then
   PHP_DEBUG=1
   ZEND_DEBUG=yes
   changequote({,})
-  CFLAGS=`echo "$CFLAGS" | $SED -e 's/-O[0-9s]*//g'`
-  CXXFLAGS=`echo "$CXXFLAGS" | $SED -e 's/-O[0-9s]*//g'`
+  CFLAGS=`echo "$CFLAGS" | "${SED}" -e 's/-O[0-9s]*//g'`
+  CXXFLAGS=`echo "$CXXFLAGS" | "${SED}" -e 's/-O[0-9s]*//g'`
   changequote([,])
   dnl Add -O0 only if GCC or ICC is used.
   if test "$GCC" = "yes" || test "$ICC" = "yes"; then
@@ -1097,6 +1044,42 @@ esyscmd(./build/config-stubs ext)
 dnl Extensions post-config.
 dnl ----------------------------------------------------------------------------
 
+dnl Align segments on huge page boundary
+case $host_alias in
+  i[[3456]]86-*-linux-* | x86_64-*-linux-*)
+	AC_MSG_CHECKING(linker support for -zcommon-page-size=2097152)
+    save_LDFLAGS=$LDFLAGS
+    LDFLAGS="$LDFLAGS -Wl,-zcommon-page-size=2097152 -Wl,-zmax-page-size=2097152"
+    AC_RUN_IFELSE(
+        [AC_LANG_SOURCE([[int main() {return 0;}]])],
+        [ac_cv_common_page_size=yes],
+        [ac_cv_common_page_size=no],
+        [ac_cv_common_page_size=no])
+    LDFLAGS=$save_LDFLAGS
+    if test "$ac_cv_common_page_size" = "yes"; then
+        AC_MSG_RESULT([yes])
+        EXTRA_LDFLAGS_PROGRAM="$EXTRA_LDFLAGS_PROGRAM -Wl,-zcommon-page-size=2097152 -Wl,-zmax-page-size=2097152"
+    else
+        AC_MSG_RESULT([no])
+        AC_MSG_CHECKING(linker support for -zmax-page-size=2097152)
+        save_LDFLAGS=$LDFLAGS
+        LDFLAGS="$LDFLAGS -Wl,-zmax-page-size=2097152"
+        AC_RUN_IFELSE(
+            [AC_LANG_SOURCE([[int main() {return 0;}]])],
+            [ac_cv_max_page_size=yes],
+            [ac_cv_max_page_size=no],
+            [ac_cv_max_page_size=no])
+        LDFLAGS=$save_LDFLAGS
+        if test "$ac_cv_max_page_size" = "yes"; then
+            AC_MSG_RESULT([yes])
+            EXTRA_LDFLAGS_PROGRAM="$EXTRA_LDFLAGS_PROGRAM -Wl,-zmax-page-size=2097152"
+        else
+            AC_MSG_RESULT([no])
+        fi
+    fi
+    ;;
+esac
+
 enable_shared=yes
 enable_static=yes
 
@@ -1191,7 +1174,7 @@ LIBZEND_BASIC_CHECKS
 LIBZEND_DLSYM_CHECK
 LIBZEND_OTHER_CHECKS
 
-if test "$ZEND_ZTS" = "yes"; then
+if test "$ZEND_MAINTAINER_ZTS" = "yes"; then
   AC_DEFINE(ZTS,1,[ ])
   PHP_THREAD_SAFETY=yes
 else
@@ -1212,15 +1195,8 @@ unset LIBS LDFLAGS
 PHP_HELP_SEPARATOR([TSRM:])
 PHP_CONFIGURE_PART(Configuring TSRM)
 if test "$PHP_THREAD_SAFETY" = "yes"; then
-  TSRM_CHECK_PTHREADS
+  TSRM_THREADS_CHECKS
 fi
-
-dnl Align segments on huge page boundary
-case $host_alias in
-  i[[3456]]86-*-linux-* | x86_64-*-linux-*)
-    EXTRA_LDFLAGS_PROGRAM="$EXTRA_LDFLAGS_PROGRAM -Wl,-zcommon-page-size=2097152 -Wl,-zmax-page-size=2097152"
-    ;;
-esac
 
 EXTRA_LDFLAGS="$EXTRA_LDFLAGS $LDFLAGS"
 EXTRA_LDFLAGS_PROGRAM="$EXTRA_LDFLAGS_PROGRAM $LDFLAGS"
@@ -1257,7 +1233,7 @@ libdir=`eval echo $libdir`
 datadir=`eval eval echo $datadir`
 
 dnl Build extension directory path.
-ZEND_MODULE_API_NO=`$EGREP '#define ZEND_MODULE_API_NO ' $srcdir/Zend/zend_modules.h|$SED 's/#define ZEND_MODULE_API_NO //'`
+ZEND_MODULE_API_NO=`$EGREP '#define ZEND_MODULE_API_NO ' $srcdir/Zend/zend_modules.h|"${SED}" 's/#define ZEND_MODULE_API_NO //'`
 
 if test -z "$EXTENSION_DIR"; then
   extbasedir=$ZEND_MODULE_API_NO
@@ -1267,7 +1243,7 @@ if test -z "$EXTENSION_DIR"; then
     else
       part1=no-debug
     fi
-    if test "$enable_zts" = "yes"; then
+    if test "$enable_maintainer_zts" = "yes"; then
       part2=zts
     else
       part2=non-zts
@@ -1275,7 +1251,7 @@ if test -z "$EXTENSION_DIR"; then
     extbasedir=$part1-$part2-$extbasedir
     EXTENSION_DIR=$libdir/extensions/$extbasedir
   else
-    if test "$enable_zts" = "yes"; then
+    if test "$enable_maintainer_zts" = "yes"; then
       extbasedir=$extbasedir-zts
     fi
 
@@ -1348,7 +1324,8 @@ PHP_BUILD_DATE=`date -u +%Y-%m-%d`
 fi
 AC_DEFINE_UNQUOTED(PHP_BUILD_DATE,"$PHP_BUILD_DATE",[PHP build date])
 
-PHP_UNAME=`uname -a | xargs`
+UNAME=`uname -a | xargs`
+PHP_UNAME=${PHP_UNAME:-$UNAME}
 AC_DEFINE_UNQUOTED(PHP_UNAME,"$PHP_UNAME",[uname -a output])
 PHP_OS=`uname | xargs`
 AC_DEFINE_UNQUOTED(PHP_OS,"$PHP_OS",[uname output])
@@ -1524,7 +1501,7 @@ PHP_ADD_SOURCES(Zend, \
     zend_iterators.c zend_interfaces.c zend_exceptions.c zend_strtod.c zend_gc.c \
     zend_closures.c zend_weakrefs.c zend_float.c zend_string.c zend_signal.c zend_generators.c \
     zend_virtual_cwd.c zend_ast.c zend_objects.c zend_object_handlers.c zend_objects_API.c \
-    zend_default_classes.c zend_inheritance.c zend_smart_str.c zend_cpuinfo.c zend_gdb.c, \
+    zend_default_classes.c zend_inheritance.c zend_smart_str.c zend_cpuinfo.c, \
 	-DZEND_ENABLE_STATIC_TSRMLS_CACHE=1)
 
 dnl Selectively disable optimization due to high RAM usage during compiling the
@@ -1549,6 +1526,8 @@ PHP_GEN_GLOBAL_MAKEFILE
 
 AC_DEFINE([HAVE_BUILD_DEFS_H], 1, [ ])
 
+dnl Make directories when building in a separate build directory.
+$php_shtool mkdir -p pear
 $php_shtool mkdir -p scripts
 $php_shtool mkdir -p scripts/man1
 
@@ -1608,7 +1587,7 @@ cat <<X
 |                                                                    |
 | You have built PHP for Apache's current non-threaded MPM.          |
 | If you change Apache to use a threaded MPM you must reconfigure    |
-| PHP with --enable-zts                                              |
+| PHP with --enable-maintainer-zts                                   |
 X
         fi
       fi

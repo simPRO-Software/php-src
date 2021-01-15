@@ -94,12 +94,14 @@ if (typeof(CWD) == "undefined") {
 	CWD = FSO.GetParentFolderName(FSO.GetParentFolderName(FSO.GetAbsolutePathName("main\\php_version.h")));
 }
 
-/* defaults; we pick up the precise versions from configure.ac */
-var PHP_VERSION = 8;
-var PHP_MINOR_VERSION = 0;
-var PHP_RELEASE_VERSION = 0;
-var PHP_EXTRA_VERSION = "";
-var PHP_VERSION_STRING = "8.0.0";
+if (!MODE_PHPIZE) {
+	/* defaults; we pick up the precise versions from configure.ac */
+	var PHP_VERSION = 7;
+	var PHP_MINOR_VERSION = 4;
+	var PHP_RELEASE_VERSION = 0;
+	var PHP_EXTRA_VERSION = "";
+	var PHP_VERSION_STRING = "7.4.0";
+}
 
 /* Get version numbers and DEFINE as a string */
 function get_version_numbers()
@@ -321,7 +323,7 @@ function conf_process_args()
 	var i, j;
 	var configure_help_mode = false;
 	var analyzed = false;
-	var nice = "cscript /nologo configure.js ";
+	var nice = "cscript /nologo /e:jscript configure.js ";
 	var disable_all = false;
 
 	args = WScript.Arguments;
@@ -2340,6 +2342,8 @@ function generate_phpize()
 	MF.WriteLine("var PHP_VERSION=" + PHP_VERSION);
 	MF.WriteLine("var PHP_MINOR_VERSION=" + PHP_MINOR_VERSION);
 	MF.WriteLine("var PHP_RELEASE_VERSION=" + PHP_RELEASE_VERSION);
+	MF.WriteLine("var PHP_EXTRA_VERSION=\"" + PHP_EXTRA_VERSION + "\"");
+	MF.WriteLine("var PHP_VERSION_STRING=\"" + PHP_VERSION_STRING + "\"");
 	MF.WriteBlankLines(1);
 	MF.WriteLine("/* Genereted extensions list with mode (static/shared) */");
 
@@ -3425,8 +3429,13 @@ function toolset_setup_build_mode()
 			ADD_FLAG("CFLAGS", "/Zi");
 			ADD_FLAG("LDFLAGS", "/incremental:no /debug /opt:ref,icf");
 		}
-		// Equivalent to Release_TSInline build -> best optimization
-		ADD_FLAG("CFLAGS", "/LD /MD /W3 /Ox /D NDebug /D NDEBUG /D ZEND_WIN32_FORCE_INLINE /GF /D ZEND_DEBUG=0");
+		ADD_FLAG("CFLAGS", "/LD /MD /W3");
+		if (PHP_SANITIZER == "yes" && CLANG_TOOLSET) {
+			ADD_FLAG("CFLAGS", "/Od /D NDebug /D NDEBUG /D ZEND_WIN32_NEVER_INLINE /D ZEND_DEBUG=0");
+		} else {
+			// Equivalent to Release_TSInline build -> best optimization
+			ADD_FLAG("CFLAGS", "/Ox /D NDebug /D NDEBUG /D ZEND_WIN32_FORCE_INLINE /GF /D ZEND_DEBUG=0");
+		}
 
 		// if you have VS.Net /GS hardens the binary against buffer overruns
 		// ADD_FLAG("CFLAGS", "/GS");
@@ -3701,8 +3710,7 @@ function add_asan_opts(cflags_name, libs_name, ldflags_name)
 	}
 
 	if (!!cflags_name) {
-		ADD_FLAG(cflags_name, "-fsanitize=address");
-		ADD_FLAG(cflags_name, "-fsanitize-address-use-after-scope");
+		ADD_FLAG(cflags_name, "-fsanitize=address,undefined");
 	}
 	if (!!libs_name) {
 		if (X64) {

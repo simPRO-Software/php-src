@@ -1057,8 +1057,10 @@ PHP_FUNCTION(pcntl_signal)
 	zval *handle;
 	zend_long signo;
 	zend_bool restart_syscalls = 1;
+	zend_bool restart_syscalls_is_null = 1;
+	char *error = NULL;
 
-	if (zend_parse_parameters(ZEND_NUM_ARGS(), "lz|b", &signo, &handle, &restart_syscalls) == FAILURE) {
+	if (zend_parse_parameters(ZEND_NUM_ARGS(), "lz|b!", &signo, &handle, &restart_syscalls, &restart_syscalls_is_null) == FAILURE) {
 		return;
 	}
 
@@ -1080,6 +1082,13 @@ PHP_FUNCTION(pcntl_signal)
 		}
 	}
 
+	/* If restart_syscalls was not explicitly specified and the signal is SIGALRM, then default
+	 * restart_syscalls to false. PHP used to enforce that restart_syscalls is false for SIGALRM,
+	 * so we keep this differing default to reduce the degree of BC breakage. */
+	if (restart_syscalls_is_null && signo == SIGALRM) {
+		restart_syscalls = 0;
+	}
+
 	/* Special long value case for SIG_DFL and SIG_IGN */
 	if (Z_TYPE_P(handle) == IS_LONG) {
 		if (Z_LVAL_P(handle) != (zend_long) SIG_DFL && Z_LVAL_P(handle) != (zend_long) SIG_IGN) {
@@ -1095,13 +1104,15 @@ PHP_FUNCTION(pcntl_signal)
 		RETURN_TRUE;
 	}
 
-	if (!zend_is_callable(handle, 0, NULL)) {
+	if (!zend_is_callable_ex(handle, NULL, 0, NULL, NULL, &error)) {
 		zend_string *func_name = zend_get_callable_name(handle);
 		PCNTL_G(last_error) = EINVAL;
-		php_error_docref(NULL, E_WARNING, "%s is not a callable function name error", ZSTR_VAL(func_name));
+		php_error_docref(NULL, E_WARNING, "Specified handler \"%s\" is not callable (%s)", ZSTR_VAL(func_name), error);
 		zend_string_release_ex(func_name, 0);
+		efree(error);
 		RETURN_FALSE;
 	}
+	ZEND_ASSERT(!error);
 
 	/* Add the function name to our signal table */
 	handle = zend_hash_index_update(&PCNTL_G(php_signal_table), signo, handle);

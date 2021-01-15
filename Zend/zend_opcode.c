@@ -152,22 +152,42 @@ ZEND_API void zend_cleanup_internal_class_data(zend_class_entry *ce)
 		zval *static_members = CE_STATIC_MEMBERS(ce);
 		zval *p = static_members;
 		zval *end = p + ce->default_static_members_count;
-
-		ZEND_MAP_PTR_SET(ce->static_members_table, NULL);
-		while (p != end) {
-			if (UNEXPECTED(Z_ISREF_P(p))) {
-				zend_property_info *prop_info;
-				ZEND_REF_FOREACH_TYPE_SOURCES(Z_REF_P(p), prop_info) {
-					if (prop_info->ce == ce && p - static_members == prop_info->offset) {
-						ZEND_REF_DEL_TYPE_SOURCE(Z_REF_P(p), prop_info);
-						break; /* stop iteration here, the array might be realloc()'ed */
-					}
-				} ZEND_REF_FOREACH_TYPE_SOURCES_END();
+		if (UNEXPECTED(ZEND_MAP_PTR(ce->static_members_table) == &ce->default_static_members_table)) {
+			/* Special case: If this is a static property on a dl'ed internal class, then the
+			 * static property table and the default property table are the same. In this case we
+			 * destroy the values here, but leave behind valid UNDEF zvals and don't free the
+			 * table itself. */
+			while (p != end) {
+				if (UNEXPECTED(Z_ISREF_P(p))) {
+					zend_property_info *prop_info;
+					ZEND_REF_FOREACH_TYPE_SOURCES(Z_REF_P(p), prop_info) {
+						if (prop_info->ce == ce && p - static_members == prop_info->offset) {
+							ZEND_REF_DEL_TYPE_SOURCE(Z_REF_P(p), prop_info);
+							break; /* stop iteration here, the array might be realloc()'ed */
+						}
+					} ZEND_REF_FOREACH_TYPE_SOURCES_END();
+				}
+				i_zval_ptr_dtor(p);
+				ZVAL_UNDEF(p);
+				p++;
 			}
-			i_zval_ptr_dtor(p);
-			p++;
+		} else {
+			ZEND_MAP_PTR_SET(ce->static_members_table, NULL);
+			while (p != end) {
+				if (UNEXPECTED(Z_ISREF_P(p))) {
+					zend_property_info *prop_info;
+					ZEND_REF_FOREACH_TYPE_SOURCES(Z_REF_P(p), prop_info) {
+						if (prop_info->ce == ce && p - static_members == prop_info->offset) {
+							ZEND_REF_DEL_TYPE_SOURCE(Z_REF_P(p), prop_info);
+							break; /* stop iteration here, the array might be realloc()'ed */
+						}
+					} ZEND_REF_FOREACH_TYPE_SOURCES_END();
+				}
+				i_zval_ptr_dtor(p);
+				p++;
+			}
+			efree(static_members);
 		}
-		efree(static_members);
 	}
 }
 
@@ -655,6 +675,12 @@ static void emit_live_range(
 		default:
 			start++;
 			kind = ZEND_LIVE_TMPVAR;
+
+			/* Check hook to determine whether a live range is necessary,
+			 * e.g. based on type info. */
+			if (needs_live_range && !needs_live_range(op_array, orig_def_opline)) {
+				return;
+			}
 			break;
 		}
 		case ZEND_COPY_TMP:
@@ -692,11 +718,6 @@ static void emit_live_range(
 			emit_live_range_raw(op_array, var_num, kind, start, end);
 			return;
 		}
-	}
-
-	/* Check hook to determine whether a live range is necessary, e.g. based on type info. */
-	if (needs_live_range && !needs_live_range(op_array, orig_def_opline)) {
-		return;
 	}
 
 	emit_live_range_raw(op_array, var_num, kind, start, end);
@@ -796,7 +817,17 @@ static void zend_calc_live_ranges(
 		}
 		if (opline->op2_type & (IS_TMP_VAR|IS_VAR)) {
 			uint32_t var_num = EX_VAR_TO_NUM(opline->op2.var) - var_offset;
-			if (EXPECTED(last_use[var_num] == (uint32_t) -1)) {
+			if (UNEXPECTED(opline->opcode == ZEND_FE_FETCH_R
+					|| opline->opcode == ZEND_FE_FETCH_RW)) {
+				/* OP2 of FE_FETCH is actually a def, not a use. */
+				if (last_use[var_num] != (uint32_t) -1) {
+					if (opnum + 1 != last_use[var_num]) {
+						emit_live_range(
+							op_array, var_num, opnum, last_use[var_num], needs_live_range);
+					}
+					last_use[var_num] = (uint32_t) -1;
+				}
+			} else if (EXPECTED(last_use[var_num] == (uint32_t) -1)) {
 #if 1
 				/* OP_DATA uses only op1 operand */
 				ZEND_ASSERT(opline->opcode != ZEND_OP_DATA);

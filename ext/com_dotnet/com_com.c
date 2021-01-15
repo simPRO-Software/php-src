@@ -60,10 +60,12 @@ PHP_FUNCTION(com_create_instance)
 			ZEND_NUM_ARGS(), "s|s!ls",
 			&module_name, &module_name_len, &server_name, &server_name_len,
 			&cp, &typelib_name, &typelib_name_len) &&
-		FAILURE == zend_parse_parameters(
-			ZEND_NUM_ARGS(), "sa|ls",
+		FAILURE == zend_parse_parameters_ex(ZEND_PARSE_PARAMS_QUIET,
+			ZEND_NUM_ARGS(), "sa/|ls",
 			&module_name, &module_name_len, &server_params, &cp,
 			&typelib_name, &typelib_name_len)) {
+
+		php_com_throw_exception(E_INVALIDARG, "Could not create COM object - invalid arguments!");
 		return;
 	}
 
@@ -83,7 +85,9 @@ PHP_FUNCTION(com_create_instance)
 
 		if (NULL != (tmp = zend_hash_str_find(Z_ARRVAL_P(server_params),
 				"Server", sizeof("Server")-1))) {
-			convert_to_string_ex(tmp);
+			if (!try_convert_to_string(tmp)) {
+				return;
+			}
 			server_name = Z_STRVAL_P(tmp);
 			server_name_len = Z_STRLEN_P(tmp);
 			ctx = CLSCTX_REMOTE_SERVER;
@@ -91,21 +95,27 @@ PHP_FUNCTION(com_create_instance)
 
 		if (NULL != (tmp = zend_hash_str_find(Z_ARRVAL_P(server_params),
 				"Username", sizeof("Username")-1))) {
-			convert_to_string_ex(tmp);
+			if (!try_convert_to_string(tmp)) {
+				return;
+			}
 			user_name = Z_STRVAL_P(tmp);
 			user_name_len = Z_STRLEN_P(tmp);
 		}
 
 		if (NULL != (tmp = zend_hash_str_find(Z_ARRVAL_P(server_params),
 				"Password", sizeof("Password")-1))) {
-			convert_to_string_ex(tmp);
+			if (!try_convert_to_string(tmp)) {
+				return;
+			}
 			password = Z_STRVAL_P(tmp);
 			password_len = Z_STRLEN_P(tmp);
 		}
 
 		if (NULL != (tmp = zend_hash_str_find(Z_ARRVAL_P(server_params),
 				"Domain", sizeof("Domain")-1))) {
-			convert_to_string_ex(tmp);
+			if (!try_convert_to_string(tmp)) {
+				return;
+			}
 			domain_name = Z_STRVAL_P(tmp);
 			domain_name_len = Z_STRLEN_P(tmp);
 		}
@@ -131,7 +141,7 @@ PHP_FUNCTION(com_create_instance)
 		info.pwszName = php_com_string_to_olestring(server_name, server_name_len, obj->code_page);
 
 		if (user_name) {
-			authid.User = php_com_string_to_olestring(user_name, -1, obj->code_page);
+			authid.User = (OLECHAR*)user_name;
 			authid.UserLength = (ULONG)user_name_len;
 
 			if (password) {
@@ -219,7 +229,6 @@ PHP_FUNCTION(com_create_instance)
 
 	if (server_name) {
 		if (info.pwszName) efree(info.pwszName);
-		if (authid.User) efree(authid.User);
 	}
 
 	efree(moniker);
@@ -246,7 +255,7 @@ PHP_FUNCTION(com_create_instance)
 		TL = php_com_load_typelib_via_cache(typelib_name, obj->code_page, &cached);
 
 		if (TL) {
-			if (COMG(autoreg_on) && !cached) {
+			if (COMG(autoreg_on)) {
 				php_com_import_typelib(TL, mode, obj->code_page);
 			}
 
@@ -300,6 +309,7 @@ PHP_FUNCTION(com_get_active_object)
 	php_com_initialize();
 	if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS(), "s|l",
 				&module_name, &module_name_len, &code_page)) {
+		php_com_throw_exception(E_INVALIDARG, "Invalid arguments!");
 		return;
 	}
 
@@ -437,8 +447,9 @@ HRESULT php_com_get_id_of_name(php_com_dotnet_object *obj, char *name,
 	if (obj->typeinfo) {
 		hr = ITypeInfo_GetIDsOfNames(obj->typeinfo, &olename, 1, dispid);
 		if (FAILED(hr)) {
+			HRESULT hr1 = hr;
 			hr = IDispatch_GetIDsOfNames(V_DISPATCH(&obj->v), &IID_NULL, &olename, 1, LOCALE_SYSTEM_DEFAULT, dispid);
-			if (SUCCEEDED(hr)) {
+			if (SUCCEEDED(hr) && hr1 != E_NOTIMPL) {
 				/* fall back on IDispatch direct */
 				ITypeInfo_Release(obj->typeinfo);
 				obj->typeinfo = NULL;
@@ -585,6 +596,7 @@ int php_com_do_invoke_byref(php_com_dotnet_object *obj, zend_internal_function *
 			}
 		}
 		efree(vargs);
+		if (byref_vals) efree(byref_vals);
 	}
 
 	return SUCCEEDED(hr) ? SUCCESS : FAILURE;
@@ -701,7 +713,7 @@ PHP_FUNCTION(com_event_sink)
 
 	if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS(), "Oo|z/",
 			&object, php_com_variant_class_entry, &sinkobject, &sink)) {
-		return;
+		RETURN_FALSE;
 	}
 
 	php_com_initialize();
@@ -716,7 +728,9 @@ PHP_FUNCTION(com_event_sink)
 		if ((tmp = zend_hash_index_find(Z_ARRVAL_P(sink), 1)) != NULL && Z_TYPE_P(tmp) == IS_STRING)
 			dispname = Z_STRVAL_P(tmp);
 	} else if (sink != NULL) {
-		convert_to_string(sink);
+		if (!try_convert_to_string(sink)) {
+			return;
+		}
 		dispname = Z_STRVAL_P(sink);
 	}
 
@@ -762,7 +776,7 @@ PHP_FUNCTION(com_print_typeinfo)
 
 	if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS(), "z/|s!b", &arg1, &ifacename,
 				&ifacelen, &wantsink)) {
-		return;
+		RETURN_FALSE;
 	}
 
 	php_com_initialize();
@@ -829,8 +843,7 @@ PHP_FUNCTION(com_load_typelib)
 	}
 
 	if (!cs) {
-		php_error_docref(NULL, E_WARNING, "Declaration of case-insensitive constants is no longer supported");
-		RETURN_FALSE;
+		php_error_docref(NULL, E_DEPRECATED, "Declaration of case-insensitive constants is deprecated");
 	}
 
 	RETVAL_FALSE;
@@ -838,9 +851,7 @@ PHP_FUNCTION(com_load_typelib)
 	php_com_initialize();
 	pTL = php_com_load_typelib_via_cache(name, codepage, &cached);
 	if (pTL) {
-		if (cached) {
-			RETVAL_TRUE;
-		} else if (php_com_import_typelib(pTL, cs ? CONST_CS : 0, codepage) == SUCCESS) {
+		if (php_com_import_typelib(pTL, cs ? CONST_CS : 0, codepage) == SUCCESS) {
 			RETVAL_TRUE;
 		}
 

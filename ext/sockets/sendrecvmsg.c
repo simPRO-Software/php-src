@@ -106,7 +106,7 @@ static void init_ancillary_registry(void)
 	entry.to_array		= to; \
 	key.cmsg_level		= level; \
 	key.cmsg_type		= type; \
-	zend_hash_str_update_mem(&ancillary_registry.ht, (char*)&key, sizeof(key) - 1, (void*)&entry, sizeof(entry))
+	zend_hash_str_update_mem(&ancillary_registry.ht, (char*)&key, sizeof(key), (void*)&entry, sizeof(entry))
 
 #if defined(IPV6_PKTINFO) && HAVE_IPV6
 	PUT_ENTRY(sizeof(struct in6_pktinfo), 0, 0, from_zval_write_in6_pktinfo,
@@ -156,7 +156,7 @@ ancillary_reg_entry *get_ancillary_reg_entry(int cmsg_level, int msg_type)
 	tsrm_mutex_unlock(ancillary_mutex);
 #endif
 
-	if ((entry = zend_hash_str_find_ptr(&ancillary_registry.ht, (char*)&key, sizeof(key) - 1)) != NULL) {
+	if ((entry = zend_hash_str_find_ptr(&ancillary_registry.ht, (char*)&key, sizeof(key))) != NULL) {
 		return entry;
 	} else {
 		return NULL;
@@ -197,14 +197,13 @@ PHP_FUNCTION(socket_sendmsg)
 	res = sendmsg(php_sock->bsd_socket, msghdr, (int)flags);
 
 	if (res != -1) {
-		zend_llist_destroy(allocations);
-		efree(allocations);
-
-		RETURN_LONG((zend_long)res);
+		RETVAL_LONG((zend_long)res);
 	} else {
 		PHP_SOCKET_ERROR(php_sock, "error in sendmsg", errno);
-		RETURN_FALSE;
+		RETVAL_FALSE;
 	}
+
+	allocations_dispose(&allocations);
 }
 
 PHP_FUNCTION(socket_recvmsg)
@@ -254,7 +253,6 @@ PHP_FUNCTION(socket_recvmsg)
 
 		/* we don;t need msghdr anymore; free it */
 		msghdr = NULL;
-		allocations_dispose(&allocations);
 
 		zval_ptr_dtor(zmsg);
 		if (!err.has_error) {
@@ -265,14 +263,15 @@ PHP_FUNCTION(socket_recvmsg)
 			/* no need to destroy/free zres -- it's NULL in this circumstance */
 			assert(zres == NULL);
 		}
+		RETVAL_LONG((zend_long)res);
 	} else {
 		SOCKETS_G(last_error) = errno;
 		php_error_docref(NULL, E_WARNING, "error in recvmsg [%d]: %s",
 				errno, sockets_strerror(errno));
-		RETURN_FALSE;
+		RETVAL_FALSE;
 	}
 
-	RETURN_LONG((zend_long)res);
+	allocations_dispose(&allocations);
 }
 
 PHP_FUNCTION(socket_cmsg_space)

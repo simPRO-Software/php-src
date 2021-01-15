@@ -137,13 +137,13 @@ PHP_METHOD(sqlite3, open)
 
 	rc = sqlite3_open_v2(fullpath, &(db_obj->db), flags, NULL);
 	if (rc != SQLITE_OK) {
-		sqlite3_close(db_obj->db);
 		zend_throw_exception_ex(zend_ce_exception, 0, "Unable to open database: %s",
 #ifdef HAVE_SQLITE3_ERRSTR
 				db_obj->db ? sqlite3_errmsg(db_obj->db) : sqlite3_errstr(rc));
 #else
 				db_obj->db ? sqlite3_errmsg(db_obj->db) : "");
 #endif
+		sqlite3_close(db_obj->db);
 		if (fullpath != filename) {
 			efree(fullpath);
 		}
@@ -153,8 +153,8 @@ PHP_METHOD(sqlite3, open)
 #if SQLITE_HAS_CODEC
 	if (encryption_key_len > 0) {
 		if (sqlite3_key(db_obj->db, encryption_key, encryption_key_len) != SQLITE_OK) {
-			sqlite3_close(db_obj->db);
 			zend_throw_exception_ex(zend_ce_exception, 0, "Unable to open database: %s", sqlite3_errmsg(db_obj->db));
+			sqlite3_close(db_obj->db);
 			return;
 		}
 	}
@@ -1652,7 +1652,7 @@ PHP_METHOD(sqlite3stmt, getSQL)
 	}
 
 	if (expanded) {
-#if SQLITE_VERSION_NUMBER >= 3014000
+#ifdef HAVE_SQLITE3_EXPANDED_SQL
 		char *sql = sqlite3_expanded_sql(stmt_obj->stmt);
 		RETVAL_STRING(sql);
 		sqlite3_free(sql);
@@ -1960,7 +1960,7 @@ PHP_METHOD(sqlite3result, columnType)
 		return;
 	}
 
-	if (result_obj->complete) {
+	if (!sqlite3_data_count(result_obj->stmt_obj->stmt)) {
 		RETURN_FALSE;
 	}
 
@@ -2015,7 +2015,6 @@ PHP_METHOD(sqlite3result, fetchArray)
 			break;
 
 		case SQLITE_DONE:
-			result_obj->complete = 1;
 			RETURN_FALSE;
 			break;
 
@@ -2042,8 +2041,6 @@ PHP_METHOD(sqlite3result, reset)
 	if (sqlite3_reset(result_obj->stmt_obj->stmt) != SQLITE_OK) {
 		RETURN_FALSE;
 	}
-
-	result_obj->complete = 0;
 
 	RETURN_TRUE;
 }

@@ -468,9 +468,12 @@ struct _pdo_dbh_t {
 	/* when set, convert int/floats to strings */
 	unsigned stringify:1;
 
+	/* bitmap for pdo_param_event(s) to skip in dispatch_param_event */
+	unsigned skip_param_evt:7;
+
 	/* the sum of the number of bits here and the bit fields preceding should
 	 * equal 32 */
-	unsigned _reserved_flags:21;
+	unsigned _reserved_flags:14;
 
 	/* data source string used to open this handle */
 	const char *data_source;
@@ -691,4 +694,5 @@ PDO_API void php_pdo_dbh_delref(pdo_dbh_t *dbh);
 PDO_API void php_pdo_free_statement(pdo_stmt_t *stmt);
 
 
+PDO_API void pdo_throw_exception(unsigned int driver_errcode, char *driver_errmsg, pdo_error_type *pdo_error);
 #endif /* PHP_PDO_DRIVER_H */

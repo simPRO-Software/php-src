@@ -60,7 +60,7 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_dom_document_create_cdatasection, 0, 0, 1)
 	ZEND_ARG_INFO(0, data)
 ZEND_END_ARG_INFO();
 
-ZEND_BEGIN_ARG_INFO_EX(arginfo_dom_document_create_processing_instruction, 0, 0, 2)
+ZEND_BEGIN_ARG_INFO_EX(arginfo_dom_document_create_processing_instruction, 0, 0, 1)
 	ZEND_ARG_INFO(0, target)
 	ZEND_ARG_INFO(0, data)
 ZEND_END_ARG_INFO();
@@ -77,7 +77,7 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_dom_document_get_elements_by_tag_name, 0, 0, 1)
 	ZEND_ARG_INFO(0, tagName)
 ZEND_END_ARG_INFO();
 
-ZEND_BEGIN_ARG_INFO_EX(arginfo_dom_document_import_node, 0, 0, 2)
+ZEND_BEGIN_ARG_INFO_EX(arginfo_dom_document_import_node, 0, 0, 1)
 	ZEND_ARG_OBJ_INFO(0, importedNode, DOMNode, 0)
 	ZEND_ARG_INFO(0, deep)
 ZEND_END_ARG_INFO();
@@ -342,7 +342,7 @@ int dom_document_encoding_write(dom_object *obj, zval *newval)
 		return FAILURE;
 	}
 
-	handler = xmlFindCharEncodingHandler(Z_STRVAL_P(newval));
+	handler = xmlFindCharEncodingHandler(ZSTR_VAL(str));
 
     if (handler != NULL) {
 		xmlCharEncCloseFunc(handler);
@@ -2050,7 +2050,6 @@ static void dom_load_html(INTERNAL_FUNCTION_PARAMETERS, int mode) /* {{{ */
 		}
 		ctxt = htmlCreateFileParserCtxt(source, NULL);
 	} else {
-		source_len = xmlStrlen((xmlChar *) source);
 		if (ZEND_SIZE_T_INT_OVFL(source_len)) {
 			php_error_docref(NULL, E_WARNING, "Input string is too long");
 			RETURN_FALSE;

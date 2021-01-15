@@ -299,8 +299,8 @@ ZEND_INI_BEGIN()
 	STD_PHP_INI_ENTRY("opcache.blacklist_filename"    , ""    , PHP_INI_SYSTEM, OnUpdateString,	             accel_directives.user_blacklist_filename,   zend_accel_globals, accel_globals)
 	STD_PHP_INI_ENTRY("opcache.max_file_size"         , "0"   , PHP_INI_SYSTEM, OnUpdateLong,	             accel_directives.max_file_size,             zend_accel_globals, accel_globals)
 
-	STD_PHP_INI_ENTRY("opcache.protect_memory"        , "0"  , PHP_INI_SYSTEM, OnUpdateBool,                  accel_directives.protect_memory,            zend_accel_globals, accel_globals)
-	STD_PHP_INI_ENTRY("opcache.save_comments"         , "1"  , PHP_INI_SYSTEM, OnUpdateBool,                  accel_directives.save_comments,             zend_accel_globals, accel_globals)
+	STD_PHP_INI_BOOLEAN("opcache.protect_memory"        , "0"  , PHP_INI_SYSTEM, OnUpdateBool,                  accel_directives.protect_memory,            zend_accel_globals, accel_globals)
+	STD_PHP_INI_BOOLEAN("opcache.save_comments"         , "1"  , PHP_INI_SYSTEM, OnUpdateBool,                  accel_directives.save_comments,             zend_accel_globals, accel_globals)
 
 	STD_PHP_INI_ENTRY("opcache.optimization_level"    , DEFAULT_OPTIMIZATION_LEVEL , PHP_INI_SYSTEM, OnUpdateLong, accel_directives.optimization_level,   zend_accel_globals, accel_globals)
 	STD_PHP_INI_ENTRY("opcache.opt_debug_level"       , "0"      , PHP_INI_SYSTEM, OnUpdateLong,             accel_directives.opt_debug_level,            zend_accel_globals, accel_globals)
@@ -316,15 +316,18 @@ ZEND_INI_BEGIN()
 #endif
 
 	STD_PHP_INI_ENTRY("opcache.file_cache"                    , NULL  , PHP_INI_SYSTEM, OnUpdateFileCache, accel_directives.file_cache,                    zend_accel_globals, accel_globals)
-	STD_PHP_INI_ENTRY("opcache.file_cache_only"               , "0"   , PHP_INI_SYSTEM, OnUpdateBool,	   accel_directives.file_cache_only,               zend_accel_globals, accel_globals)
-	STD_PHP_INI_ENTRY("opcache.file_cache_consistency_checks" , "1"   , PHP_INI_SYSTEM, OnUpdateBool,	   accel_directives.file_cache_consistency_checks, zend_accel_globals, accel_globals)
+	STD_PHP_INI_BOOLEAN("opcache.file_cache_only"               , "0"   , PHP_INI_SYSTEM, OnUpdateBool,	   accel_directives.file_cache_only,               zend_accel_globals, accel_globals)
+	STD_PHP_INI_BOOLEAN("opcache.file_cache_consistency_checks" , "1"   , PHP_INI_SYSTEM, OnUpdateBool,	   accel_directives.file_cache_consistency_checks, zend_accel_globals, accel_globals)
 #if ENABLE_FILE_CACHE_FALLBACK
-	STD_PHP_INI_ENTRY("opcache.file_cache_fallback"           , "1"   , PHP_INI_SYSTEM, OnUpdateBool,	   accel_directives.file_cache_fallback,           zend_accel_globals, accel_globals)
+	STD_PHP_INI_BOOLEAN("opcache.file_cache_fallback"           , "1"   , PHP_INI_SYSTEM, OnUpdateBool,	   accel_directives.file_cache_fallback,           zend_accel_globals, accel_globals)
 #endif
 #ifdef HAVE_HUGE_CODE_PAGES
 	STD_PHP_INI_BOOLEAN("opcache.huge_code_pages"             , "0"   , PHP_INI_SYSTEM, OnUpdateBool,      accel_directives.huge_code_pages,               zend_accel_globals, accel_globals)
 #endif
 	STD_PHP_INI_ENTRY("opcache.preload"                       , ""    , PHP_INI_SYSTEM, OnUpdateStringUnempty,    accel_directives.preload,                zend_accel_globals, accel_globals)
+#ifndef ZEND_WIN32
+	STD_PHP_INI_ENTRY("opcache.preload_user"                  , ""    , PHP_INI_SYSTEM, OnUpdateStringUnempty,    accel_directives.preload_user,           zend_accel_globals, accel_globals)
+#endif
 #if ZEND_WIN32
 	STD_PHP_INI_ENTRY("opcache.cache_id"                      , ""    , PHP_INI_SYSTEM, OnUpdateString,           accel_directives.cache_id,               zend_accel_globals, accel_globals)
 #endif
@@ -792,6 +795,9 @@ static ZEND_FUNCTION(opcache_get_configuration)
 	add_assoc_bool(&directives,   "opcache.huge_code_pages",         ZCG(accel_directives).huge_code_pages);
 #endif
 	add_assoc_string(&directives, "opcache.preload", STRING_NOT_NULL(ZCG(accel_directives).preload));
+#ifndef ZEND_WIN32
+	add_assoc_string(&directives, "opcache.preload_user", STRING_NOT_NULL(ZCG(accel_directives).preload_user));
+#endif
 #if ZEND_WIN32
 	add_assoc_string(&directives, "opcache.cache_id", STRING_NOT_NULL(ZCG(accel_directives).cache_id));
 #endif
@@ -876,6 +882,11 @@ static ZEND_FUNCTION(opcache_compile_file)
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &script_name, &script_name_len) == FAILURE) {
 		return;
+	}
+
+	if (!accel_startup_ok) {
+		zend_error(E_NOTICE, ACCELERATOR_PRODUCT_NAME " has not been properly started, can't compile file");
+		RETURN_FALSE;
 	}
 
 	zend_stream_init_filename(&handle, script_name);

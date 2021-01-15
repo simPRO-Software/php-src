@@ -712,6 +712,12 @@ static void zend_persist_class_entry(zval *zv)
 	zend_class_entry *ce = Z_PTR_P(zv);
 
 	if (ce->type == ZEND_USER_CLASS) {
+		/* The same zend_class_entry may be reused by class_alias */
+		zend_class_entry *new_ce = zend_shared_alloc_get_xlat_entry(ce);
+		if (new_ce) {
+			Z_PTR_P(zv) = new_ce;
+			return;
+		}
 		if ((ce->ce_flags & ZEND_ACC_LINKED)
 		 && (ce->ce_flags & ZEND_ACC_CONSTANTS_UPDATED)
 		 && (ce->ce_flags & ZEND_ACC_PROPERTY_TYPES_RESOLVED)
@@ -943,8 +949,9 @@ static void zend_update_parent_ce(zend_class_entry *ce)
 				zend_class_entry *ce = ZEND_TYPE_CE(prop->type);
 				if (ce->type == ZEND_USER_CLASS) {
 					ce = zend_shared_alloc_get_xlat_entry(ce);
-					ZEND_ASSERT(ce);
-					prop->type = ZEND_TYPE_ENCODE_CE(ce, ZEND_TYPE_ALLOW_NULL(prop->type));
+					if (ce) {
+						prop->type = ZEND_TYPE_ENCODE_CE(ce, ZEND_TYPE_ALLOW_NULL(prop->type));
+					}
 				}
 			}
 		} ZEND_HASH_FOREACH_END();
@@ -1042,8 +1049,11 @@ static void zend_accel_persist_class_table(HashTable *class_table)
 		zend_accel_store_interned_string(p->key);
 		zend_persist_class_entry(&p->val);
 	} ZEND_HASH_FOREACH_END();
-    ZEND_HASH_FOREACH_PTR(class_table, ce) {
-		zend_update_parent_ce(ce);
+    ZEND_HASH_FOREACH_BUCKET(class_table, p) {
+		if (EXPECTED(Z_TYPE(p->val) != IS_ALIAS_PTR)) {
+			ce = Z_PTR(p->val);
+			zend_update_parent_ce(ce);
+		}
 	} ZEND_HASH_FOREACH_END();
 }
 
@@ -1097,7 +1107,9 @@ zend_persistent_script *zend_accel_script_persist(zend_persistent_script *script
 	} ZEND_HASH_FOREACH_END();
 	zend_persist_op_array_ex(&script->script.main_op_array, script);
 
-	ZCSG(map_ptr_last) = CG(map_ptr_last);
+	if (for_shm) {
+		ZCSG(map_ptr_last) = CG(map_ptr_last);
+	}
 
 #ifdef HAVE_JIT
 	if (ZCG(jit_enabled) && for_shm) {

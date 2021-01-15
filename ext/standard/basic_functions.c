@@ -1528,7 +1528,7 @@ ZEND_END_ARG_INFO()
 #endif
 /* }}} */
 /* {{{ pack.c */
-ZEND_BEGIN_ARG_INFO_EX(arginfo_pack, 0, 0, 2)
+ZEND_BEGIN_ARG_INFO_EX(arginfo_pack, 0, 0, 1)
 	ZEND_ARG_INFO(0, format)
 	ZEND_ARG_VARIADIC_INFO(0, args)
 ZEND_END_ARG_INFO()
@@ -1733,7 +1733,7 @@ ZEND_BEGIN_ARG_INFO(arginfo_stream_context_get_options, 0)
 	ZEND_ARG_INFO(0, stream_or_context)
 ZEND_END_ARG_INFO()
 
-ZEND_BEGIN_ARG_INFO(arginfo_stream_context_set_option, 0)
+ZEND_BEGIN_ARG_INFO_EX(arginfo_stream_context_set_option, 0, 0, 2)
 	ZEND_ARG_INFO(0, stream_or_context)
 	ZEND_ARG_INFO(0, wrappername)
 	ZEND_ARG_INFO(0, optionname)
@@ -3346,6 +3346,7 @@ PHP_MINIT_FUNCTION(basic) /* {{{ */
 	register_html_constants(INIT_FUNC_ARGS_PASSTHRU);
 	register_string_constants(INIT_FUNC_ARGS_PASSTHRU);
 
+	BASIC_MINIT_SUBMODULE(var)
 	BASIC_MINIT_SUBMODULE(file)
 	BASIC_MINIT_SUBMODULE(pack)
 	BASIC_MINIT_SUBMODULE(browscap)
@@ -3912,6 +3913,7 @@ PHP_FUNCTION(putenv)
 		}
 		/* valw may be NULL, but the failed conversion still needs to be checked. */
 		if (!keyw || !valw && value) {
+			tsrm_env_unlock();
 			efree(pe.putenv_string);
 			efree(pe.key);
 			free(keyw);
@@ -4152,7 +4154,7 @@ PHP_FUNCTION(getopt)
 
 	while ((o = php_getopt(argc, argv, opts, &php_optarg, &php_optind, 0, 1)) != -1) {
 		/* Skip unknown arguments. */
-		if (o == '?') {
+		if (o == PHP_GETOPT_INVALID_ARG) {
 			continue;
 		}
 

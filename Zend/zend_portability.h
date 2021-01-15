@@ -55,6 +55,7 @@
 #endif
 
 #include <stdarg.h>
+#include <stddef.h>
 
 #ifdef HAVE_DLFCN_H
 # include <dlfcn.h>
@@ -288,7 +289,7 @@ char *alloca();
 	(_default)
 #endif
 
-#if ZEND_DEBUG
+#if ZEND_DEBUG || defined(ZEND_WIN32_NEVER_INLINE)
 # define zend_always_inline inline
 # define zend_never_inline
 #else
@@ -327,24 +328,19 @@ char *alloca();
 
 #ifndef XtOffsetOf
 # if defined(CRAY) || (defined(__ARMCC_VERSION) && !defined(LINUX))
-# ifdef __STDC__
-# define XtOffset(p_type, field) _Offsetof(p_type, field)
-# else
-# ifdef CRAY2
-# define XtOffset(p_type, field) \
-    (sizeof(int)*((unsigned int)&(((p_type)NULL)->field)))
-
-# else /* !CRAY2 */
-
-# define XtOffset(p_type, field) ((unsigned int)&(((p_type)NULL)->field))
-
-# endif /* !CRAY2 */
-# endif /* __STDC__ */
+#  ifdef __STDC__
+#   define XtOffset(p_type, field) _Offsetof(p_type, field)
+#  else
+#   ifdef CRAY2
+#    define XtOffset(p_type, field) \
+       (sizeof(int)*((unsigned int)&(((p_type)NULL)->field)))
+#   else /* !CRAY2 */
+#    define XtOffset(p_type, field) ((unsigned int)&(((p_type)NULL)->field))
+#   endif /* !CRAY2 */
+#  endif /* __STDC__ */
 # else /* ! (CRAY || __arm) */
-
-# define XtOffset(p_type, field) \
-    ((zend_long) (((char *) (&(((p_type)NULL)->field))) - ((char *) NULL)))
-
+#  define XtOffset(p_type, field) \
+     ((zend_long) (((char *) (&(((p_type)NULL)->field))) - ((char *) NULL)))
 # endif /* !CRAY */
 
 # ifdef offsetof
@@ -355,7 +351,7 @@ char *alloca();
 
 #endif
 
-#if (HAVE_ALLOCA || (defined (__GNUC__) && __GNUC__ >= 2)) && !(defined(ZTS)) && !(defined(ZTS) && defined(HPUX)) && !defined(DARWIN)
+#if (HAVE_ALLOCA || (defined (__GNUC__) && __GNUC__ >= 2)) && !(defined(ZTS) && defined(HPUX)) && !defined(DARWIN)
 # define ZEND_ALLOCA_MAX_SIZE (32 * 1024)
 # define ALLOCA_FLAG(name) \
 	zend_bool name;
@@ -527,7 +523,7 @@ static zend_always_inline double _zend_get_nan(void) /* {{{ */
 
 /* Memory sanitizer is incompatible with ifunc resolvers. Even if the resolver
  * is marked as no_sanitize("memory") it will still be instrumented and crash. */
-#if __has_feature(memory_sanitizer)
+#if __has_feature(memory_sanitizer) || __has_feature(thread_sanitizer)
 # undef HAVE_FUNC_ATTRIBUTE_IFUNC
 #endif
 
@@ -650,6 +646,14 @@ static zend_always_inline double _zend_get_nan(void) /* {{{ */
 /* On CPU with few registers, it's cheaper to reload value then use spill slot */
 #if defined(__i386__) || (defined(_WIN32) && !defined(_WIN64))
 # define ZEND_PREFER_RELOAD
+#endif
+
+#if defined(ZEND_WIN32) && defined(_DEBUG) && defined(PHP_WIN32_DEBUG_HEAP)
+# define ZEND_IGNORE_LEAKS_BEGIN() _CrtSetDbgFlag(_CrtSetDbgFlag(_CRTDBG_REPORT_FLAG) & ~_CRTDBG_ALLOC_MEM_DF)
+# define ZEND_IGNORE_LEAKS_END() _CrtSetDbgFlag(_CrtSetDbgFlag(_CRTDBG_REPORT_FLAG) | _CRTDBG_ALLOC_MEM_DF)
+#else
+# define ZEND_IGNORE_LEAKS_BEGIN()
+# define ZEND_IGNORE_LEAKS_END()
 #endif
 
 #endif /* ZEND_PORTABILITY_H */

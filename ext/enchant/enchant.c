@@ -450,7 +450,7 @@ PHP_FUNCTION(enchant_broker_get_dict_path)
 /* }}} */
 #endif
 
-/* {{{ proto string enchant_broker_list_dicts(resource broker)
+/* {{{ proto array enchant_broker_list_dicts(resource broker)
    Lists the dictionaries available for the given broker */
 PHP_FUNCTION(enchant_broker_list_dicts)
 {
@@ -669,18 +669,16 @@ PHP_FUNCTION(enchant_dict_quick_check)
 	PHP_ENCHANT_GET_DICT;
 
 	if (enchant_dict_check(pdict->pdict, word, wordlen) > 0) {
-		int n_sugg;
-		size_t n_sugg_st;
+		size_t n_sugg;
 		char **suggs;
 
 		if (!sugg && ZEND_NUM_ARGS() == 2) {
 			RETURN_FALSE;
 		}
 
-		suggs = enchant_dict_suggest(pdict->pdict, word, wordlen, &n_sugg_st);
-		memcpy(&n_sugg, &n_sugg_st, sizeof(n_sugg));
+		suggs = enchant_dict_suggest(pdict->pdict, word, wordlen, &n_sugg);
 		if (suggs && n_sugg) {
-			int i;
+			size_t i;
 			for (i = 0; i < n_sugg; i++) {
 				add_next_index_string(sugg, suggs[i]);
 			}
@@ -722,8 +720,7 @@ PHP_FUNCTION(enchant_dict_suggest)
 	size_t wordlen;
 	char **suggs;
 	enchant_dict *pdict;
-	int n_sugg;
-	size_t n_sugg_st;
+	size_t n_sugg;
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "rs", &dict, &word, &wordlen) == FAILURE) {
 		return;
@@ -731,10 +728,9 @@ PHP_FUNCTION(enchant_dict_suggest)
 
 	PHP_ENCHANT_GET_DICT;
 
-	suggs = enchant_dict_suggest(pdict->pdict, word, wordlen, &n_sugg_st);
-	memcpy(&n_sugg, &n_sugg_st, sizeof(n_sugg));
+	suggs = enchant_dict_suggest(pdict->pdict, word, wordlen, &n_sugg);
 	if (suggs && n_sugg) {
-		int i;
+		size_t i;
 
 		array_init(return_value);
 		for (i = 0; i < n_sugg; i++) {

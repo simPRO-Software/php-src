@@ -164,6 +164,10 @@ static int dispatch_param_event(pdo_stmt_t *stmt, enum pdo_param_event event_typ
 	struct pdo_bound_param_data *param;
 	HashTable *ht;
 
+	if (stmt->dbh->skip_param_evt & (1 << event_type)) {
+		return 1;
+	}
+
 	if (!stmt->methods->param_hook) {
 		return 1;
 	}
@@ -1092,17 +1096,6 @@ static int do_fetch(pdo_stmt_t *stmt, int do_bind, zval *return_value, enum pdo_
 							&val);
 						zval_ptr_dtor(&val);
 					} else {
-#ifdef MBO_0
-						php_unserialize_data_t var_hash;
-
-						PHP_VAR_UNSERIALIZE_INIT(var_hash);
-						if (php_var_unserialize(return_value, (const unsigned char**)&Z_STRVAL(val), Z_STRVAL(val)+Z_STRLEN(val), NULL) == FAILURE) {
-							pdo_raise_impl_error(stmt->dbh, stmt, "HY000", "cannot unserialize data");
-							PHP_VAR_UNSERIALIZE_DESTROY(var_hash);
-							return 0;
-						}
-						PHP_VAR_UNSERIALIZE_DESTROY(var_hash);
-#endif
 						if (!ce->unserialize) {
 							zval_ptr_dtor(&val);
 							pdo_raise_impl_error(stmt->dbh, stmt, "HY000", "cannot unserialize class");
@@ -1874,7 +1867,8 @@ int pdo_stmt_setup_fetch_mode(INTERNAL_FUNCTION_PARAMETERS, pdo_stmt_t *stmt, in
 			mode = Z_LVAL(args[skip]);
 			flags = mode & PDO_FETCH_FLAGS;
 
-			retval = pdo_stmt_verify_mode(stmt, mode, 0);
+			/* pdo_stmt_verify_mode() returns a boolean value */
+			retval = pdo_stmt_verify_mode(stmt, mode, 0) ? SUCCESS : FAILURE;
 		}
 	}
 

@@ -1395,6 +1395,7 @@ int phar_create_or_parse_filename(char *fname, size_t fname_len, char *alias, si
 	mydata = ecalloc(1, sizeof(phar_archive_data));
 	mydata->fname = expand_filepath(fname, NULL);
 	if (mydata->fname == NULL) {
+		efree(mydata);
 		return FAILURE;
 	}
 	fname_len = strlen(mydata->fname);
@@ -3427,6 +3428,7 @@ PHP_MSHUTDOWN_FUNCTION(phar) /* {{{ */
 		zend_hash_destroy(&(cached_alias));
 	}
 
+	UNREGISTER_INI_ENTRIES();
 	return SUCCESS;
 }
 /* }}} */

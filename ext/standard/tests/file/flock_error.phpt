@@ -1,5 +1,7 @@
 --TEST--
 Test flock() function: Error conditions
+--CONFLICTS--
+obscure_filename
 --FILE--
 <?php
 /*
@@ -29,11 +31,7 @@ $operations = array(
 $i = 0;
 foreach($operations as $operation) {
   echo "\n--- Iteration $i ---";
-  try {
-    var_dump(flock($fp, $operation));
-  } catch (TypeError $e) {
-    echo "\n", $e->getMessage(), "\n";
-  }
+  var_dump(flock($fp, $operation));
   $i++;
 }
 
@@ -41,13 +39,16 @@ foreach($operations as $operation) {
 /* Invalid arguments */
 $fp = fopen($file, "w");
 fclose($fp);
-try {
-    var_dump(flock($fp, LOCK_SH|LOCK_NB));
-} catch (TypeError $e) {
-    echo $e->getMessage(), "\n";
-}
+var_dump(flock($fp, LOCK_SH|LOCK_NB));
 
-echo "\n*** Done ***\n";
+var_dump(flock("", "", $var));
+
+/* No.of args leass than expected */
+var_dump(flock());
+var_dump(flock($fp));
+
+/* No.of args greater than expected */
+var_dump(flock($fp, "", $var, ""));
 ?>
 --CLEAN--
 <?php
@@ -74,19 +75,36 @@ Warning: flock(): Illegal operation argument in %s on line %d
 bool(false)
 
 --- Iteration 4 ---
-flock() expects parameter 2 to be int, array given
+Warning: flock() expects parameter 2 to be int, array given in %s on line %d
+NULL
 
 --- Iteration 5 ---
-flock() expects parameter 2 to be int, array given
+Warning: flock() expects parameter 2 to be int, array given in %s on line %d
+NULL
 
 --- Iteration 6 ---
-flock() expects parameter 2 to be int, string given
+Warning: flock() expects parameter 2 to be int, string given in %s on line %d
+NULL
 
 --- Iteration 7 ---
-flock() expects parameter 2 to be int, string given
+Warning: flock() expects parameter 2 to be int, string given in %s on line %d
+NULL
 
 --- Iteration 8 ---
-flock() expects parameter 2 to be int, string given
-flock(): supplied resource is not a valid stream resource
+Warning: flock() expects parameter 2 to be int, string given in %s on line %d
+NULL
 
-*** Done ***
+Warning: flock(): supplied resource is not a valid stream resource in %s on line %d
+bool(false)
+
+Warning: flock() expects parameter 1 to be resource, string given in %s on line %d
+NULL
+
+Warning: flock() expects at least 2 parameters, 0 given in %s on line %d
+NULL
+
+Warning: flock() expects at least 2 parameters, 1 given in %s on line %d
+NULL
+
+Warning: flock() expects at most 3 parameters, 4 given in %s on line %d
+NULL

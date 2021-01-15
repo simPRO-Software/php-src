@@ -1,6 +1,7 @@
 #!/bin/bash
-if [[ "$ENABLE_ZTS" == 1 ]]; then
-	TS="--enable-zts";
+set -ex
+if [[ "$ENABLE_MAINTAINER_ZTS" == 1 ]]; then
+	TS="--enable-maintainer-zts";
 else
 	TS="";
 fi
@@ -23,7 +24,7 @@ else
 	MAKE_QUIET=""
 fi
 
-MAKE_JOBS=${MAKE_JOBS:-2}
+MAKE_JOBS=${MAKE_JOBS:-$(nproc)}
 
 ./buildconf --force
 ./configure \
@@ -75,9 +76,10 @@ $TS \
 --with-kerberos \
 --enable-sysvmsg \
 --with-ffi \
+--with-sodium \
 --enable-zend-test=shared \
 --enable-werror \
-> "$CONFIG_LOG_FILE"
+--with-pear
 
-make "-j${MAKE_JOBS}" $MAKE_QUIET > "$MAKE_LOG_FILE"
-make install >> "$MAKE_LOG_FILE"
+make "-j${MAKE_JOBS}" $MAKE_QUIET
+make install

@@ -65,6 +65,7 @@ typedef void OnigMatchParam;
 #define onig_new_match_param() (NULL)
 #define onig_initialize_match_param(x) (void)(x)
 #define onig_set_match_stack_limit_size_of_match_param(x, y)
+#define onig_set_retry_limit_in_match_of_match_param(x, y)
 #define onig_free_match_param(x)
 #define onig_search_with_param(reg, str, end, start, range, region, option, mp) \
 onig_search(reg, str, end, start, range, region, option)
@@ -391,6 +392,7 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_mb_decode_numericentity, 0, 0, 2)
 	ZEND_ARG_INFO(0, string)
 	ZEND_ARG_INFO(0, convmap)
 	ZEND_ARG_INFO(0, encoding)
+	ZEND_ARG_INFO(0, is_hex)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_mb_send_mail, 0, 0, 3)
@@ -1009,6 +1011,9 @@ static int _php_mb_match_regex(void *opaque, const char *str, size_t str_len)
 	if (!ZEND_LONG_UINT_OVFL(MBSTRG(regex_stack_limit))) {
 		onig_set_match_stack_limit_size_of_match_param(mp, (unsigned int)MBSTRG(regex_stack_limit));
 	}
+	if (!ZEND_LONG_UINT_OVFL(MBSTRG(regex_retry_limit))) {
+		onig_set_retry_limit_in_match_of_match_param(mp, (unsigned int)MBSTRG(regex_retry_limit));
+	}
 	/* search */
 	err = onig_search_with_param((php_mb_regex_t *)opaque, (const OnigUChar *)str,
 		(const OnigUChar*)str + str_len, (const OnigUChar *)str,
@@ -1473,6 +1478,7 @@ PHP_INI_BEGIN()
 		strict_detection, zend_mbstring_globals, mbstring_globals)
 #if HAVE_MBREGEX
 	STD_PHP_INI_ENTRY("mbstring.regex_stack_limit", "100000",PHP_INI_ALL, OnUpdateLong, regex_stack_limit, zend_mbstring_globals, mbstring_globals)
+	STD_PHP_INI_ENTRY("mbstring.regex_retry_limit", "1000000",PHP_INI_ALL, OnUpdateLong, regex_retry_limit, zend_mbstring_globals, mbstring_globals)
 #endif
 PHP_INI_END()
 /* }}} */
@@ -2355,6 +2361,7 @@ PHP_FUNCTION(mb_str_split)
 
 		mbfl_convert_filter_delete(decoder);
 		mbfl_convert_filter_delete(filter);
+		mbfl_memory_device_clear(&device);
 		return;
 	}
 
@@ -3258,12 +3265,12 @@ PHP_FUNCTION(mb_convert_encoding)
 
 					if ( _from_encodings) {
 						l = strlen(_from_encodings);
-						n = strlen(Z_STRVAL_P(hash_entry));
+						n = ZSTR_LEN(encoding_str);
 						_from_encodings = erealloc(_from_encodings, l+n+2);
 						memcpy(_from_encodings + l, ",", 1);
-						memcpy(_from_encodings + l + 1, Z_STRVAL_P(hash_entry), Z_STRLEN_P(hash_entry) + 1);
+						memcpy(_from_encodings + l + 1, ZSTR_VAL(encoding_str), ZSTR_LEN(encoding_str) + 1);
 					} else {
-						_from_encodings = estrdup(Z_STRVAL_P(hash_entry));
+						_from_encodings = estrdup(ZSTR_VAL(encoding_str));
 					}
 					zend_string_release(encoding_str);
 				} ZEND_HASH_FOREACH_END();
@@ -4816,27 +4823,17 @@ PHP_FUNCTION(mb_check_encoding)
 		RETURN_FALSE;
 	}
 
-	switch(Z_TYPE_P(input)) {
-		case IS_LONG:
-		case IS_DOUBLE:
-		case IS_NULL:
-		case IS_TRUE:
-		case IS_FALSE:
-			RETURN_TRUE;
-			break;
-		case IS_STRING:
-			if (!php_mb_check_encoding(Z_STRVAL_P(input), Z_STRLEN_P(input), enc ? ZSTR_VAL(enc): NULL)) {
-				RETURN_FALSE;
-			}
-			break;
-		case IS_ARRAY:
-			if (!php_mb_check_encoding_recursive(Z_ARRVAL_P(input), enc)) {
-				RETURN_FALSE;
-			}
-			break;
-		default:
-			php_error_docref(NULL, E_WARNING, "Input is something other than scalar or array");
+	if (Z_TYPE_P(input) == IS_ARRAY) {
+		if (!php_mb_check_encoding_recursive(HASH_OF(input), enc)) {
 			RETURN_FALSE;
+		}
+	} else {
+		if (!try_convert_to_string(input)) {
+			RETURN_FALSE;
+		}
+		if (!php_mb_check_encoding(Z_STRVAL_P(input), Z_STRLEN_P(input), enc ? ZSTR_VAL(enc): NULL)) {
+			RETURN_FALSE;
+		}
 	}
 	RETURN_TRUE;
 }
@@ -4855,7 +4852,7 @@ static inline zend_long php_mb_ord(const char *str, size_t str_len, zend_string 
 
 	no_enc = enc->no_encoding;
 	if (php_mb_is_unsupported_no_encoding(no_enc)) {
-		php_error_docref(NULL, E_WARNING, "Unsupported encoding \"%s\"", ZSTR_VAL(enc_name));
+		php_error_docref(NULL, E_WARNING, "Unsupported encoding \"%s\"", enc->name);
 		return -1;
 	}
 
@@ -4935,7 +4932,7 @@ static inline zend_string *php_mb_chr(zend_long cp, zend_string *enc_name)
 
 	no_enc = enc->no_encoding;
 	if (php_mb_is_unsupported_no_encoding(no_enc)) {
-		php_error_docref(NULL, E_WARNING, "Unsupported encoding \"%s\"", ZSTR_VAL(enc_name));
+		php_error_docref(NULL, E_WARNING, "Unsupported encoding \"%s\"", enc->name);
 		return NULL;
 	}
 
